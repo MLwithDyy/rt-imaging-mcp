@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: block-medical-images
+        name: Block medical image files
+        description: Reject staged files that look like DICOM or other medical image data.
+        entry: py scripts/check_no_medical_images.py
+        language: python
+        pass_filenames: true
