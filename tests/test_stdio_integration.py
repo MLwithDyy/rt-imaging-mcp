@@ -50,6 +50,7 @@ def test_server_over_stdio(root: Path) -> None:
         "rt_structure_summary",
         "rt_dose_summary",
         "rt_plan_summary",
+        "rt_dvh_metrics",
     }
     assert results["meta"].is_error is False
     assert results["scan"].is_error is False

@@ -1,6 +1,6 @@
 # Threat Model
 
-Status: draft v0.4 (rules R1-R11 implemented and tested for the first six tools; CI added). Every rule in "Hard rules" must be enforced in code and covered by an automated test
+Status: draft v0.5 (rules R1-R12 implemented and tested for all current tools; CI added). Every rule in "Hard rules" must be enforced in code and covered by an automated test
 before the tool that depends on it is merged.
 
 ## 1. Purpose and scope
@@ -51,6 +51,7 @@ Therefore the security boundary of this project is **the tool output**, not the 
 | T8 | Accidental commit of patient data | A `.dcm` file enters the git history of a public repository |
 | T9 | Identifier leakage through structure names | An RTSTRUCT ROI is named `PTV_Budi` or `Kasus 12 Bu Siti` |
 | T10 | Free text or identifiers in RT dose and plan objects | A beam is named `Boost Bu Siti`, a plan label contains a name, a referenced UID links records |
+| T11 | Misleading or unbounded dose-volume computation | A dose grid from another patient or study is paired with a structure set; a structure only partly covered by the grid; a huge contour set exhausts CPU or memory |
 
 ## 5. Hard rules
 
@@ -150,6 +151,17 @@ statistics (maximum, mean, non-zero count) but is never returned.
 
 *Covers T10.*
 
+### R12. Dose-volume metrics refuse inconsistent input and are labelled approximate
+`rt_dvh_metrics` combines two files. It refuses (with a static error) a structure set and dose that do not both carry
+a frame of reference UID or whose UIDs differ, dose that is not in Gy, grids that are not axis aligned or have fewer
+than two or non-uniform slices, unknown structures and structures without usable contours, and structures that do not
+overlap the grid. A structure that only partly lies inside the grid is computed and flagged with `inside_grid: false`.
+Rasterisation work and the number of contours per structure are capped. Metric parameters must be JSON numbers within
+range (numeric strings are rejected) and are limited in number. Every result carries `method_notes` that state the
+approximation. Frame of reference UIDs are compared but never returned.
+
+*Covers T11.*
+
 ## 6. Acknowledged limits
 
 These belong in the README and must not be hidden:
@@ -174,6 +186,11 @@ These belong in the README and must not be hidden:
 - `rt_dose_summary` statistics cover the whole dose grid, which usually includes voxels outside the patient. They are
   not structure doses. The dose array is loaded into memory (bounded by the RT file size limit of 256 MiB) and only
   uncompressed pixel data is supported.
+- `rt_dvh_metrics` is approximate. A dose voxel belongs to a structure when its centre lies inside the contours of the
+  nearest contour slice (within one slab as thick as the median contour spacing); there is no partial-volume
+  weighting, so results depend on dose grid resolution. Overlapping, non-nested contours on one slice cancel each other
+  (even-odd rule). Only axis-aligned grids in Gy with uniform slice spacing are supported. Results are validated on
+  synthetic phantoms with hand-calculated answers, not against a treatment planning system or real patient data.
 - `rt_plan_summary` reports what the plan file states and does not infer a treatment technique.
 - Numbers can still carry information (for example a very specific beam meterset). They are not treated as identifiers.
 - Only DICOM Part 10 files (with the "DICM" preamble and a transfer syntax in the file meta) are recognised.
@@ -196,6 +213,7 @@ Each rule maps to at least one automated test. A tool is not merged without its 
 | R9 | The pre-commit script blocks a synthetic DICOM file with no extension |
 | R10 | Names with extra text (`PTV_Budi`) are redacted; returned names never echo raw input; operator-enabled names pass |
 | R11 | Plan and dose files full of fake free text produce output without any of it; unknown code strings become `null`; a guard test proves the fake values are really written to the files |
+| R12 | Hand-calculated phantoms (cube, gradient, hole, misaligned and descending slices, non-square voxels, shifted origin); a voxel-by-voxel reference for random doses; refusals for mismatched or unsupported input; work and parameter limits |
 
 ## 8. Review
 
@@ -217,5 +235,6 @@ existing tool changes. Record changes in the commit message and in this file's s
 | R9 | `.gitignore`, `scripts/check_no_medical_images.py`, CI step on tracked files | `test_precommit_guard.py` |
 | R10 | `security/roi_names.py`, `tools/rt.py` | `test_roi_names.py`, `test_rt_tools.py`, `test_server.py` |
 | R11 | `tools/rt_common.py`, `tools/rt_dose.py`, `tools/rt_plan.py` | `test_rt_dose_plan.py`, `test_synthetic.py`, `test_server.py` |
+| R12 | `tools/rt_dvh.py`, `dvh.py`, `geometry.py` | `test_rt_dvh_tool.py`, `test_dvh.py`, `test_geometry.py`, `test_server.py` |
 
 The guard script is tested directly. CI also runs it over every tracked file, so a commit made with `--no-verify` is still caught after the push (the data would already be in the history, so the hook remains the primary defence).

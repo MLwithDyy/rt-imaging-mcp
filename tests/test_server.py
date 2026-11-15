@@ -36,6 +36,14 @@ EXPECTED_TOOLS = {
     "rt_structure_summary",
     "rt_dose_summary",
     "rt_plan_summary",
+    "rt_dvh_metrics",
+}
+
+
+DVH_ARGUMENTS: dict[str, Any] = {
+    "struct_path": "dvh_struct.dcm",
+    "dose_path": "dvh_dose.dcm",
+    "roi_number": 1,
 }
 
 
@@ -76,6 +84,16 @@ def server(root: Path) -> MCPServer:
     write_rtstruct(root / "struct.dcm", rois)
     write_rtdose(root / "dose.dcm", np.full((3, 4, 4), 1000, dtype=np.uint32))
     write_rtplan(root / "plan.dcm", [BeamSpec(1), BeamSpec(2, gantry=90.0)])
+    dvh_rois = [RoiSpec(1, "PTV", "PTV", "MANUAL", extrude(square(-1, -1, 10), [0, 2, 4, 6, 8]))]
+    write_rtstruct(root / "dvh_struct.dcm", dvh_rois)
+    write_rtdose(
+        root / "dvh_dose.dcm",
+        np.full((6, 10, 10), 10_000, dtype=np.uint32),
+        scaling=0.001,
+        pixel_spacing=(2.0, 2.0),
+        slice_offsets=[0, 2, 4, 6, 8, 10],
+        origin=(0.0, 0.0, 0.0),
+    )
     return create_server(Config.from_root(root))
 
 
@@ -102,6 +120,7 @@ def test_no_tool_output_contains_identifiers_or_pixels(server: MCPServer, root: 
         call(server, "rt_structure_summary", {"path": "struct.dcm"}),
         call(server, "rt_dose_summary", {"path": "dose.dcm"}),
         call(server, "rt_plan_summary", {"path": "plan.dcm"}),
+        call(server, "rt_dvh_metrics", DVH_ARGUMENTS),
     ]
     for output in outputs:
         text = result_text(output)
@@ -124,6 +143,10 @@ def test_error_results_are_static_and_do_not_leak(server: MCPServer, root: Path)
         ("rt_dose_summary", {"path": "struct.dcm"}),
         ("rt_plan_summary", {"path": "dose.dcm"}),
         ("rt_plan_summary", {"path": "../plan.dcm"}),
+        ("rt_dvh_metrics", {**DVH_ARGUMENTS, "roi_number": 99}),
+        ("rt_dvh_metrics", {**DVH_ARGUMENTS, "struct_path": "../struct.dcm"}),
+        ("rt_dvh_metrics", {**DVH_ARGUMENTS, "dose_path": "dose.dcm"}),  # grid far from structure
+        ("rt_dvh_metrics", {**DVH_ARGUMENTS, "dose_percentages": [150]}),
     ]
     for name, arguments in cases:
         with pytest.raises(ToolError) as info:
@@ -187,6 +210,15 @@ def test_dose_and_plan_through_server(server: MCPServer) -> None:
     plan = call(server, "rt_plan_summary", {"path": "plan.dcm"}).structured_content
     assert plan["beam_count"] == 2
     assert [beam["gantry_angle_start"] for beam in plan["beams"]] == [0.0, 90.0]
+
+
+def test_dvh_through_server(server: MCPServer) -> None:
+    result = call(server, "rt_dvh_metrics", DVH_ARGUMENTS).structured_content
+    assert result["voxel_count"] == 125
+    assert result["d_metrics_gy"] == {"D95": 10.0, "D50": 10.0, "D2": 10.0}
+    assert result["v_metrics"]["V20Gy"]["percent"] == 0.0
+    assert result["name"] == "PTV"
+    assert result["inside_grid"] is True
 
 
 def test_parser_accepts_roi_names(root: Path) -> None:

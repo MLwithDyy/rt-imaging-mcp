@@ -63,3 +63,27 @@ class NotRtDoseError(RtImagingMcpError):
 
 class NotRtPlanError(RtImagingMcpError):
     message = "file is not a readable RT plan file"
+
+
+class InvalidParameterError(RtImagingMcpError):
+    message = "invalid parameter"
+
+
+class StructureNotFoundError(RtImagingMcpError):
+    message = "structure not found or has no usable contours"
+
+
+class FrameOfReferenceError(RtImagingMcpError):
+    message = "frame of reference is missing or does not match between structure set and dose"
+
+
+class UnsupportedGridError(RtImagingMcpError):
+    message = "dose grid orientation, spacing or units are not supported"
+
+
+class NoStructureVoxelsError(RtImagingMcpError):
+    message = "structure does not overlap the dose grid"
+
+
+class WorkLimitError(RtImagingMcpError):
+    message = "computation exceeds the work limit"

@@ -6,7 +6,8 @@ A local, read-only [Model Context Protocol](https://modelcontextprotocol.io) ser
 inspect medical image files (DICOM, NIfTI) on your own disk, with PHI-safe output by default.
 
 > **Status: early development (pre-alpha).** DICOM scanning, allowlisted DICOM metadata, NIfTI header
-> information and RTSTRUCT, RTDOSE and RTPLAN summaries work today. DVH metrics and radiomics are planned, not implemented.
+> information, RTSTRUCT, RTDOSE and RTPLAN summaries and approximate dose-volume metrics work today. Radiomics is planned,
+> not implemented. Dose-volume results are validated on synthetic phantoms only, not against a planning system.
 
 ## Read this first
 
@@ -26,6 +27,7 @@ inspect medical image files (DICOM, NIfTI) on your own disk, with PHI-safe outpu
 | `nifti_info` | Shape, voxel size, data type, units and orientation from the NIfTI header. Free-text header fields are never returned. |
 | `rt_dose_summary` | RTDOSE grid: dose type and units, grid size, voxel size, whole-grid maximum and mean dose, non-zero voxel count. No dose array, no grid position. |
 | `rt_plan_summary` | RTPLAN: intent, approval status, fractions, one entry per beam (type, radiation, energy, angles, dose, meterset) and prescription doses. No plan, beam or machine names. |
+| `rt_dvh_metrics` | Dose statistics, D(p) and V(t) for one structure of an RTSTRUCT on an RTDOSE grid (for example D95, D2, V20 Gy). Approximate; refuses mismatched frames of reference. |
 | `rt_structure_summary` | One entry per RTSTRUCT structure: interpreted type, contour and slice counts, extent, approximate planar volume. Names are returned only if standard (TG-263 style), otherwise `null`. |
 
 All tools are read-only and are declared as such to the client.
@@ -39,6 +41,8 @@ All tools are read-only and are declared as such to the client.
   names (a TG-263-style subset) and fixed-token target names such as `PTV_High` are returned; others are `null`.
 - **RT dose and plan output is numbers and enumerated codes only.** Plan, beam and machine names, reviewer names and
   other free text are never returned.
+- **Dose-volume metrics refuse inconsistent input.** The structure set and dose must share a frame of reference and
+  use a supported grid; results are labelled approximate and computation is bounded.
 - **No pixel data**, ever (the dose grid is read to compute statistics and is never returned).
 - **One root directory.** The server refuses to start without `--root` (or `RT_IMAGING_MCP_ROOT`). `..`, absolute paths
   outside the root and symlinks that leave the root are rejected.
@@ -110,7 +114,7 @@ and a pre-commit hook. Do not attach real patient data to issues or pull request
 
 1. DICOM and NIfTI basics (done, pre-alpha)
 2. CI on Python 3.11-3.13, Linux and Windows (done)
-3. Radiotherapy objects: RTSTRUCT, RTDOSE and RTPLAN summaries (done), simple DVH metrics
+3. Radiotherapy objects: RTSTRUCT, RTDOSE and RTPLAN summaries and approximate DVH metrics (done)
 4. Radiomics feature extraction with validation against IBSI reference data
 5. Release to PyPI
 

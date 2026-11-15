@@ -12,6 +12,7 @@ from tests.synthetic import (
     ALL_RT_IDENTIFYING_VALUES,
     FAKE_BEAM_NAME,
     FAKE_DOSE_REF_DESCRIPTION,
+    FAKE_FOR_UID,
     FAKE_ID,
     FAKE_INSTITUTION,
     FAKE_MACHINE,
@@ -52,11 +53,11 @@ def test_builders_really_write_every_fake_identifier(tmp_path: Path) -> None:
         "ct": (write_dicom(tmp_path / "ct"), IDENTIFYING_VALUES),
         "struct": (
             write_rtstruct(tmp_path / "struct", [RoiSpec(1, FAKE_ROI_NAME)]),
-            (FAKE_NAME, FAKE_ID, FAKE_STRUCT_LABEL, FAKE_ROI_NAME, FAKE_OBS_LABEL),
+            (FAKE_NAME, FAKE_ID, FAKE_STRUCT_LABEL, FAKE_ROI_NAME, FAKE_OBS_LABEL, FAKE_FOR_UID),
         ),
         "dose": (
             write_rtdose(tmp_path / "dose", np.ones((2, 2, 2))),
-            (FAKE_NAME, FAKE_ID, FAKE_REFERENCED_UID),
+            (FAKE_NAME, FAKE_ID, FAKE_REFERENCED_UID, FAKE_FOR_UID),
         ),
         "plan": (
             write_rtplan(tmp_path / "plan", [BeamSpec(1)]),

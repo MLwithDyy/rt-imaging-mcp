@@ -136,7 +136,10 @@ def extrude(polygon: list[Point2D], z_values: Sequence[float]) -> list[tuple[flo
     return [(z, polygon) for z in z_values]
 
 
-def build_rtstruct_dataset(rois: Sequence[RoiSpec]) -> Dataset:
+def build_rtstruct_dataset(
+    rois: Sequence[RoiSpec],
+    frame_of_reference_uid: str | None = "1.2.826.0.1.3680043.9.7777.424242",
+) -> Dataset:
     ds = Dataset()
     ds.file_meta = FileMetaDataset()
     ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
@@ -180,14 +183,18 @@ def build_rtstruct_dataset(rois: Sequence[RoiSpec]) -> Dataset:
         observation.ROIObservationLabel = FAKE_OBS_LABEL
         observations.append(observation)
 
+    if frame_of_reference_uid is not None:
+        referenced_frame = Dataset()
+        referenced_frame.FrameOfReferenceUID = frame_of_reference_uid
+        ds.ReferencedFrameOfReferenceSequence = DicomSequence([referenced_frame])
     ds.StructureSetROISequence = definitions
     ds.ROIContourSequence = contour_items
     ds.RTROIObservationsSequence = observations
     return ds
 
 
-def write_rtstruct(path: Path, rois: Sequence[RoiSpec]) -> Path:
-    build_rtstruct_dataset(rois).save_as(path, enforce_file_format=True)
+def write_rtstruct(path: Path, rois: Sequence[RoiSpec], **kwargs: Any) -> Path:
+    build_rtstruct_dataset(rois, **kwargs).save_as(path, enforce_file_format=True)
     return path
 
 
@@ -198,6 +205,7 @@ FAKE_BEAM_NAME = "SYNTHBEAM_Budi"
 FAKE_DOSE_REF_DESCRIPTION = "SYNTHDOSEREF"
 FAKE_REVIEWER = "SYNTHREVIEWER^FAKE"
 FAKE_REFERENCED_UID = "1.2.826.0.1.3680043.9.7777.1234567"
+FAKE_FOR_UID = "1.2.826.0.1.3680043.9.7777.424242"
 ALL_RT_IDENTIFYING_VALUES = (
     *RT_IDENTIFYING_VALUES,
     FAKE_PLAN_LABEL,
@@ -207,6 +215,7 @@ ALL_RT_IDENTIFYING_VALUES = (
     FAKE_DOSE_REF_DESCRIPTION,
     FAKE_REVIEWER,
     FAKE_REFERENCED_UID,
+    FAKE_FOR_UID,
 )
 
 
@@ -216,6 +225,8 @@ def build_rtdose_dataset(
     scaling: float = 0.001,
     pixel_spacing: tuple[float, float] = (2.5, 2.0),
     slice_offsets: Sequence[float] | None = None,
+    origin: tuple[float, float, float] = (-100.0, -100.0, 0.0),
+    frame_of_reference_uid: str | None = "1.2.826.0.1.3680043.9.7777.424242",
     **overrides: Any,
 ) -> Dataset:
     """Synthetic RTDOSE. ``raw`` has shape (frames, rows, columns) and is stored as uint32."""
@@ -250,7 +261,9 @@ def build_rtdose_dataset(
         ds.GridFrameOffsetVector = offsets
     ds.PixelSpacing = list(pixel_spacing)
     ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
-    ds.ImagePositionPatient = [-100.0, -100.0, 0.0]
+    ds.ImagePositionPatient = list(origin)
+    if frame_of_reference_uid is not None:
+        ds.FrameOfReferenceUID = frame_of_reference_uid
     ds.SamplesPerPixel = 1
     ds.PhotometricInterpretation = "MONOCHROME2"
     ds.BitsAllocated = 32
