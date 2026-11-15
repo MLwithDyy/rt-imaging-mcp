@@ -21,7 +21,7 @@ from rt_imaging_mcp import __version__
 from rt_imaging_mcp.config import ENV_ROOT, Config
 from rt_imaging_mcp.security.allowlist import OPT_IN_KEYWORDS
 from rt_imaging_mcp.security.errors import ConfigError, RtImagingMcpError
-from rt_imaging_mcp.tools import dicom, nifti, rt
+from rt_imaging_mcp.tools import dicom, nifti, rt, rt_dose, rt_plan
 
 INSTRUCTIONS = (
     "Read-only access to local medical image files (DICOM, NIfTI) below one configured "
@@ -126,6 +126,35 @@ def create_server(config: Config) -> MCPServer:
         in mm and an approximate planar-contour volume. No coordinates or free-text labels.
         """
         return rt.rt_structure_summary(config, path)
+
+    @server.tool(
+        name="rt_dose_summary",
+        title="Summarise an RT dose grid",
+        annotations=_READ_ONLY,
+    )
+    @_guard
+    def rt_dose_summary(path: str) -> dict[str, Any]:
+        """Summarise an RTDOSE file (path relative to the root).
+
+        Returns dose type and units, grid size, voxel size and whole-grid dose statistics
+        (maximum, mean, non-zero voxel count). No dose array, grid position or identifiers.
+        """
+        return rt_dose.rt_dose_summary(config, path)
+
+    @server.tool(
+        name="rt_plan_summary",
+        title="Summarise an RT plan",
+        annotations=_READ_ONLY,
+    )
+    @_guard
+    def rt_plan_summary(path: str) -> dict[str, Any]:
+        """Summarise an RTPLAN file (path relative to the root).
+
+        Returns intent, approval status, fractions, one entry per beam (type, radiation,
+        energy, angles, dose and meterset) and prescription doses. Plan, beam and machine
+        names and other free text are never returned.
+        """
+        return rt_plan.rt_plan_summary(config, path)
 
     return server
 

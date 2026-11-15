@@ -1,6 +1,6 @@
 # Threat Model
 
-Status: draft v0.3 (rules R1-R10 implemented and tested for the first four tools; CI added). Every rule in "Hard rules" must be enforced in code and covered by an automated test
+Status: draft v0.4 (rules R1-R11 implemented and tested for the first six tools; CI added). Every rule in "Hard rules" must be enforced in code and covered by an automated test
 before the tool that depends on it is merged.
 
 ## 1. Purpose and scope
@@ -50,6 +50,7 @@ Therefore the security boundary of this project is **the tool output**, not the 
 | T7 | Resource exhaustion | Scanning a huge directory or loading a very large volume into memory |
 | T8 | Accidental commit of patient data | A `.dcm` file enters the git history of a public repository |
 | T9 | Identifier leakage through structure names | An RTSTRUCT ROI is named `PTV_Budi` or `Kasus 12 Bu Siti` |
+| T10 | Free text or identifiers in RT dose and plan objects | A beam is named `Boost Bu Siti`, a plan label contains a name, a referenced UID links records |
 
 ## 5. Hard rules
 
@@ -139,6 +140,16 @@ and absolute contour coordinates are never returned.
 
 *Covers T9.*
 
+### R11. RT dose and plan output is numbers and enumerated codes only
+`rt_dose_summary` and `rt_plan_summary` return numbers (sizes, spacings, doses, angles, energies, counts) and DICOM
+enumerated code strings that appear on a fixed allowlist (for example `GY`, `PHYSICAL`, `PHOTON`, `APPROVED`). A code
+string that is not on the allowlist is returned as `null`, so free text hidden in a code field is never echoed. Plan
+and beam labels, names and descriptions, machine and institution names, reviewer names, dose reference descriptions,
+referenced UIDs and the position of the dose grid in patient space are never returned. The dose array is read to compute
+statistics (maximum, mean, non-zero count) but is never returned.
+
+*Covers T10.*
+
 ## 6. Acknowledged limits
 
 These belong in the README and must not be hidden:
@@ -160,6 +171,11 @@ These belong in the README and must not be hidden:
   planning system.
 - The standard structure-name list is a partial, hand-written subset. Valid structure names that are not on it
   (for example in Indonesian) are redacted until the operator enables them.
+- `rt_dose_summary` statistics cover the whole dose grid, which usually includes voxels outside the patient. They are
+  not structure doses. The dose array is loaded into memory (bounded by the RT file size limit of 256 MiB) and only
+  uncompressed pixel data is supported.
+- `rt_plan_summary` reports what the plan file states and does not infer a treatment technique.
+- Numbers can still carry information (for example a very specific beam meterset). They are not treated as identifiers.
 - Only DICOM Part 10 files (with the "DICM" preamble and a transfer syntax in the file meta) are recognised.
   Older files without a preamble are reported as non-DICOM.
 
@@ -179,6 +195,7 @@ Each rule maps to at least one automated test. A tool is not merged without its 
 | R8 | A directory exceeding the limits returns a bounded, truncated result with a clear flag |
 | R9 | The pre-commit script blocks a synthetic DICOM file with no extension |
 | R10 | Names with extra text (`PTV_Budi`) are redacted; returned names never echo raw input; operator-enabled names pass |
+| R11 | Plan and dose files full of fake free text produce output without any of it; unknown code strings become `null`; a guard test proves the fake values are really written to the files |
 
 ## 8. Review
 
@@ -199,5 +216,6 @@ existing tool changes. Record changes in the commit message and in this file's s
 | R8 | `config.py`, `security/paths.py` | `test_security_paths.py`, `test_dicom_tools.py` |
 | R9 | `.gitignore`, `scripts/check_no_medical_images.py`, CI step on tracked files | `test_precommit_guard.py` |
 | R10 | `security/roi_names.py`, `tools/rt.py` | `test_roi_names.py`, `test_rt_tools.py`, `test_server.py` |
+| R11 | `tools/rt_common.py`, `tools/rt_dose.py`, `tools/rt_plan.py` | `test_rt_dose_plan.py`, `test_synthetic.py`, `test_server.py` |
 
 The guard script is tested directly. CI also runs it over every tracked file, so a commit made with `--no-verify` is still caught after the push (the data would already be in the history, so the hook remains the primary defence).

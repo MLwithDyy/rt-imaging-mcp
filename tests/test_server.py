@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -14,13 +15,16 @@ from mcp.server.mcpserver.exceptions import ToolError
 from rt_imaging_mcp.config import Config
 from rt_imaging_mcp.server import build_parser, config_from_args, create_server
 from tests.synthetic import (
+    ALL_RT_IDENTIFYING_VALUES,
     FAKE_ROI_NAME,
-    RT_IDENTIFYING_VALUES,
+    BeamSpec,
     RoiSpec,
     extrude,
     square,
     write_dicom,
     write_nifti,
+    write_rtdose,
+    write_rtplan,
     write_rtstruct,
 )
 
@@ -30,6 +34,8 @@ EXPECTED_TOOLS = {
     "dicom_list_allowed_tags",
     "nifti_info",
     "rt_structure_summary",
+    "rt_dose_summary",
+    "rt_plan_summary",
 }
 
 
@@ -68,6 +74,8 @@ def server(root: Path) -> MCPServer:
         RoiSpec(2, FAKE_ROI_NAME, "ORGAN", "MANUAL", extrude(square(0, 0, 4), [0.0, 1.0])),
     ]
     write_rtstruct(root / "struct.dcm", rois)
+    write_rtdose(root / "dose.dcm", np.full((3, 4, 4), 1000, dtype=np.uint32))
+    write_rtplan(root / "plan.dcm", [BeamSpec(1), BeamSpec(2, gantry=90.0)])
     return create_server(Config.from_root(root))
 
 
@@ -92,10 +100,12 @@ def test_no_tool_output_contains_identifiers_or_pixels(server: MCPServer, root: 
         call(server, "dicom_list_allowed_tags", {}),
         call(server, "nifti_info", {"path": "vol.nii"}),
         call(server, "rt_structure_summary", {"path": "struct.dcm"}),
+        call(server, "rt_dose_summary", {"path": "dose.dcm"}),
+        call(server, "rt_plan_summary", {"path": "plan.dcm"}),
     ]
     for output in outputs:
         text = result_text(output)
-        for value in RT_IDENTIFYING_VALUES:
+        for value in ALL_RT_IDENTIFYING_VALUES:
             assert value not in text
         assert str(root) not in text
         assert len(text) < 10_000
@@ -110,6 +120,10 @@ def test_error_results_are_static_and_do_not_leak(server: MCPServer, root: Path)
         ("nifti_info", {"path": "PatientFolderBudi/IM0001"}),
         ("rt_structure_summary", {"path": "PatientFolderBudi/IM0001"}),
         ("rt_structure_summary", {"path": "../struct.dcm"}),
+        ("rt_dose_summary", {"path": "PatientFolderBudi/IM0001"}),
+        ("rt_dose_summary", {"path": "struct.dcm"}),
+        ("rt_plan_summary", {"path": "dose.dcm"}),
+        ("rt_plan_summary", {"path": "../plan.dcm"}),
     ]
     for name, arguments in cases:
         with pytest.raises(ToolError) as info:
@@ -117,7 +131,7 @@ def test_error_results_are_static_and_do_not_leak(server: MCPServer, root: Path)
         message = str(info.value)
         assert str(root) not in message
         assert "SecretPatientName" not in message
-        for value in RT_IDENTIFYING_VALUES:
+        for value in ALL_RT_IDENTIFYING_VALUES:
             assert value not in message
 
 
@@ -165,6 +179,14 @@ def test_parser_rejects_unknown_or_blocked_opt_in_tags(root: Path) -> None:
         args = build_parser().parse_args(["--root", str(root), "--enable-tag", tag])
         with pytest.raises(ConfigError):
             config_from_args(args)
+
+
+def test_dose_and_plan_through_server(server: MCPServer) -> None:
+    dose = call(server, "rt_dose_summary", {"path": "dose.dcm"}).structured_content
+    assert dose["max_dose"] == pytest.approx(1.0)
+    plan = call(server, "rt_plan_summary", {"path": "plan.dcm"}).structured_content
+    assert plan["beam_count"] == 2
+    assert [beam["gantry_angle_start"] for beam in plan["beams"]] == [0.0, 90.0]
 
 
 def test_parser_accepts_roi_names(root: Path) -> None:
