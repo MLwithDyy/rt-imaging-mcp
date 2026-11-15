@@ -1,6 +1,6 @@
 # Threat Model
 
-Status: draft v0.2 (rules R1-R8 implemented and tested for the first three tools). Every rule in "Hard rules" must be enforced in code and covered by an automated test
+Status: draft v0.3 (rules R1-R9 implemented and tested for the first three tools; CI added). Every rule in "Hard rules" must be enforced in code and covered by an automated test
 before the tool that depends on it is merged.
 
 ## 1. Purpose and scope
@@ -179,6 +179,6 @@ existing tool changes. Record changes in the commit message and in this file's s
 | R6 | `security/errors.py`, `server.py` | `test_server.py`, `test_nifti_tools.py`, `test_security_paths.py` |
 | R7 | read-only tools; tripwire on source | `test_static_rules.py`, `test_server.py` |
 | R8 | `config.py`, `security/paths.py` | `test_security_paths.py`, `test_dicom_tools.py` |
-| R9 | `.gitignore`, `scripts/check_no_medical_images.py` | manual check of the hook (see README) |
+| R9 | `.gitignore`, `scripts/check_no_medical_images.py`, CI step on tracked files | `test_precommit_guard.py` |
 
-R9 is not yet covered by an automated test in CI.
+The guard script is tested directly. CI also runs it over every tracked file, so a commit made with `--no-verify` is still caught after the push (the data would already be in the history, so the hook remains the primary defence).
