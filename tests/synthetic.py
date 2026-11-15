@@ -14,6 +14,8 @@ from pydicom.sequence import Sequence as DicomSequence
 from pydicom.uid import (
     CTImageStorage,
     ExplicitVRLittleEndian,
+    RTDoseStorage,
+    RTPlanStorage,
     RTStructureSetStorage,
     generate_uid,
 )
@@ -186,4 +188,184 @@ def build_rtstruct_dataset(rois: Sequence[RoiSpec]) -> Dataset:
 
 def write_rtstruct(path: Path, rois: Sequence[RoiSpec]) -> Path:
     build_rtstruct_dataset(rois).save_as(path, enforce_file_format=True)
+    return path
+
+
+FAKE_PLAN_LABEL = "SYNTHPLANLABEL"
+FAKE_PLAN_NAME = "SYNTHPLANNAME"
+FAKE_MACHINE = "SYNTHMACHINE"
+FAKE_BEAM_NAME = "SYNTHBEAM_Budi"
+FAKE_DOSE_REF_DESCRIPTION = "SYNTHDOSEREF"
+FAKE_REVIEWER = "SYNTHREVIEWER^FAKE"
+FAKE_REFERENCED_UID = "1.2.826.0.1.3680043.9.7777.1234567"
+ALL_RT_IDENTIFYING_VALUES = (
+    *RT_IDENTIFYING_VALUES,
+    FAKE_PLAN_LABEL,
+    FAKE_PLAN_NAME,
+    FAKE_MACHINE,
+    FAKE_BEAM_NAME,
+    FAKE_DOSE_REF_DESCRIPTION,
+    FAKE_REVIEWER,
+    FAKE_REFERENCED_UID,
+)
+
+
+def build_rtdose_dataset(
+    raw: np.ndarray[Any, Any],
+    *,
+    scaling: float = 0.001,
+    pixel_spacing: tuple[float, float] = (2.5, 2.0),
+    slice_offsets: Sequence[float] | None = None,
+    **overrides: Any,
+) -> Dataset:
+    """Synthetic RTDOSE. ``raw`` has shape (frames, rows, columns) and is stored as uint32."""
+    frames, rows, columns = raw.shape
+    ds = Dataset()
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds.file_meta.MediaStorageSOPClassUID = RTDoseStorage
+    ds.file_meta.MediaStorageSOPInstanceUID = generate_uid()
+
+    ds.SOPClassUID = RTDoseStorage
+    ds.SOPInstanceUID = generate_uid()
+    ds.Modality = "RTDOSE"
+    ds.PatientName = FAKE_NAME
+    ds.PatientID = FAKE_ID
+    referenced_plan = Dataset()
+    referenced_plan.ReferencedSOPClassUID = RTPlanStorage
+    referenced_plan.ReferencedSOPInstanceUID = FAKE_REFERENCED_UID
+    ds.ReferencedRTPlanSequence = DicomSequence([referenced_plan])
+
+    ds.DoseUnits = "GY"
+    ds.DoseType = "PHYSICAL"
+    ds.DoseSummationType = "PLAN"
+    ds.DoseGridScaling = scaling
+    ds.Rows = rows
+    ds.Columns = columns
+    if frames > 1:
+        ds.NumberOfFrames = frames
+        offsets = (
+            list(slice_offsets) if slice_offsets is not None else [3.0 * i for i in range(frames)]
+        )
+        ds.GridFrameOffsetVector = offsets
+    ds.PixelSpacing = list(pixel_spacing)
+    ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+    ds.ImagePositionPatient = [-100.0, -100.0, 0.0]
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.BitsAllocated = 32
+    ds.BitsStored = 32
+    ds.HighBit = 31
+    ds.PixelRepresentation = 0
+    ds.PixelData = raw.astype(np.uint32).tobytes()
+
+    for key, value in overrides.items():
+        setattr(ds, key, value)
+    return ds
+
+
+def write_rtdose(path: Path, raw: np.ndarray[Any, Any], **kwargs: Any) -> Path:
+    build_rtdose_dataset(raw, **kwargs).save_as(path, enforce_file_format=True)
+    return path
+
+
+@dataclass
+class BeamSpec:
+    number: int
+    name: str = "B"
+    radiation: str = "PHOTON"
+    beam_type: str = "STATIC"
+    delivery: str = "TREATMENT"
+    energy: float = 6.0
+    gantry: float = 0.0
+    direction: str = "NONE"
+    collimator: float = 0.0
+    couch: float = 0.0
+    control_points: int = 2
+    dose: float = 2.0
+    meterset: float = 200.0
+
+
+def build_rtplan_dataset(
+    beams: Sequence[BeamSpec],
+    *,
+    fractions: int | None = 25,
+    prescription_gy: float = 50.0,
+    organ_at_risk_max_gy: float = 45.0,
+    **overrides: Any,
+) -> Dataset:
+    ds = Dataset()
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds.file_meta.MediaStorageSOPClassUID = RTPlanStorage
+    ds.file_meta.MediaStorageSOPInstanceUID = generate_uid()
+
+    ds.SOPClassUID = RTPlanStorage
+    ds.SOPInstanceUID = generate_uid()
+    ds.Modality = "RTPLAN"
+    ds.PatientName = FAKE_NAME
+    ds.PatientID = FAKE_ID
+    ds.InstitutionName = FAKE_INSTITUTION
+    ds.RTPlanLabel = FAKE_PLAN_LABEL
+    ds.RTPlanName = FAKE_PLAN_NAME
+    ds.ReviewerName = FAKE_REVIEWER
+    ds.RTPlanGeometry = "PATIENT"
+    ds.ApprovalStatus = "APPROVED"
+    ds.PlanIntent = "CURATIVE"
+
+    beam_items = DicomSequence()
+    referenced = DicomSequence()
+    for spec in beams:
+        beam = Dataset()
+        beam.BeamNumber = spec.number
+        beam.BeamName = FAKE_BEAM_NAME if spec.name == "B" else spec.name
+        beam.BeamType = spec.beam_type
+        beam.RadiationType = spec.radiation
+        beam.TreatmentDeliveryType = spec.delivery
+        beam.TreatmentMachineName = FAKE_MACHINE
+        beam.NumberOfControlPoints = spec.control_points
+        control_point = Dataset()
+        control_point.ControlPointIndex = 0
+        control_point.NominalBeamEnergy = spec.energy
+        control_point.GantryAngle = spec.gantry
+        control_point.GantryRotationDirection = spec.direction
+        control_point.BeamLimitingDeviceAngle = spec.collimator
+        control_point.PatientSupportAngle = spec.couch
+        beam.ControlPointSequence = DicomSequence([control_point])
+        beam_items.append(beam)
+
+        reference = Dataset()
+        reference.ReferencedBeamNumber = spec.number
+        reference.BeamDose = spec.dose
+        reference.BeamMeterset = spec.meterset
+        referenced.append(reference)
+    ds.BeamSequence = beam_items
+
+    if fractions is not None:
+        group = Dataset()
+        group.FractionGroupNumber = 1
+        group.NumberOfFractionsPlanned = fractions
+        group.NumberOfBeams = len(beams)
+        group.NumberOfBrachyApplicationSetups = 0
+        group.ReferencedBeamSequence = referenced
+        ds.FractionGroupSequence = DicomSequence([group])
+
+    target = Dataset()
+    target.DoseReferenceNumber = 1
+    target.DoseReferenceType = "TARGET"
+    target.DoseReferenceDescription = FAKE_DOSE_REF_DESCRIPTION
+    target.TargetPrescriptionDose = prescription_gy
+    organ = Dataset()
+    organ.DoseReferenceNumber = 2
+    organ.DoseReferenceType = "ORGAN_AT_RISK"
+    organ.OrganAtRiskMaximumDose = organ_at_risk_max_gy
+    ds.DoseReferenceSequence = DicomSequence([target, organ])
+
+    for key, value in overrides.items():
+        setattr(ds, key, value)
+    return ds
+
+
+def write_rtplan(path: Path, beams: Sequence[BeamSpec], **kwargs: Any) -> Path:
+    build_rtplan_dataset(beams, **kwargs).save_as(path, enforce_file_format=True)
     return path

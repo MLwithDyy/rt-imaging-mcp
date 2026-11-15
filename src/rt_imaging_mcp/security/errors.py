@@ -55,3 +55,11 @@ class NotNiftiError(RtImagingMcpError):
 
 class NotRtStructError(RtImagingMcpError):
     message = "file is not a readable RT structure set"
+
+
+class NotRtDoseError(RtImagingMcpError):
+    message = "file is not a readable RT dose file"
+
+
+class NotRtPlanError(RtImagingMcpError):
+    message = "file is not a readable RT plan file"

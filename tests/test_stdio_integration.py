@@ -48,6 +48,8 @@ def test_server_over_stdio(root: Path) -> None:
         "dicom_list_allowed_tags",
         "nifti_info",
         "rt_structure_summary",
+        "rt_dose_summary",
+        "rt_plan_summary",
     }
     assert results["meta"].is_error is False
     assert results["scan"].is_error is False

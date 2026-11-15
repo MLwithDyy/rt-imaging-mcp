@@ -14,17 +14,12 @@ import numpy as np
 
 from rt_imaging_mcp.config import Config
 from rt_imaging_mcp.geometry import Polygon, net_slice_area
-from rt_imaging_mcp.security.errors import (
-    FileTooLargeError,
-    NotDicomError,
-    NotRtStructError,
-    RtImagingMcpError,
-)
-from rt_imaging_mcp.security.paths import resolve_in_root
+from rt_imaging_mcp.security.errors import NotRtStructError, RtImagingMcpError
 from rt_imaging_mcp.security.roi_names import standardize_roi_name
-from rt_imaging_mcp.tools.dicom import has_dicom_preamble, read_header
+from rt_imaging_mcp.tools.dicom import read_header
+from rt_imaging_mcp.tools.rt_common import code as _code
+from rt_imaging_mcp.tools.rt_common import prepare_rt_file
 
-RT_MAX_BYTES = 256 * 1024 * 1024
 MAX_ROIS = 1000
 MAX_CONTOURS_PER_ROI = 20_000
 
@@ -57,13 +52,6 @@ INTERPRETED_TYPES = frozenset(
 )
 GENERATION_ALGORITHMS = frozenset({"AUTOMATIC", "SEMIAUTOMATIC", "MANUAL"})
 GEOMETRIC_TYPES = frozenset({"POINT", "OPEN_PLANAR", "OPEN_NONPLANAR", "CLOSED_PLANAR"})
-
-
-def _code(value: Any, allowed: frozenset[str]) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip().upper()
-    return text if text in allowed else None
 
 
 def _roi_geometry(contour_sequence: Any) -> dict[str, Any]:
@@ -128,12 +116,7 @@ def rt_structure_summary(config: Config, path: str) -> dict[str, Any]:
     median slice spacing). It is not a clinical volume and is not validated against a treatment
     planning system.
     """
-    file = resolve_in_root(config.root, path, kind="file")
-    if file.stat().st_size > min(config.max_file_bytes, RT_MAX_BYTES):
-        raise FileTooLargeError()
-    if not has_dicom_preamble(file):
-        raise NotDicomError()
-
+    file = prepare_rt_file(config, path)
     header = read_header(file)
     try:
         if str(header.get("Modality", "")).strip().upper() != "RTSTRUCT":
