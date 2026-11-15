@@ -1,6 +1,6 @@
 # Threat Model
 
-Status: draft v0.3 (rules R1-R9 implemented and tested for the first three tools; CI added). Every rule in "Hard rules" must be enforced in code and covered by an automated test
+Status: draft v0.3 (rules R1-R10 implemented and tested for the first four tools; CI added). Every rule in "Hard rules" must be enforced in code and covered by an automated test
 before the tool that depends on it is merged.
 
 ## 1. Purpose and scope
@@ -49,6 +49,7 @@ Therefore the security boundary of this project is **the tool output**, not the 
 | T6 | Data leakage through error messages | An exception message quotes a tag value |
 | T7 | Resource exhaustion | Scanning a huge directory or loading a very large volume into memory |
 | T8 | Accidental commit of patient data | A `.dcm` file enters the git history of a public repository |
+| T9 | Identifier leakage through structure names | An RTSTRUCT ROI is named `PTV_Budi` or `Kasus 12 Bu Siti` |
 
 ## 5. Hard rules
 
@@ -127,6 +128,17 @@ Limits are configurable and have conservative defaults.
 
 *Covers T8.*
 
+### R10. Structure names are standardised or redacted
+ROI names in RT structure sets are free text. A name is returned only when it matches the built-in standard list
+(a subset inspired by AAPM TG-263, not the official list), matches a target-volume pattern built from fixed tokens
+(`GTV`, `CTV`, `ITV`, `PTV` with optional `p`/`n`, a short index and suffixes such as `_High` or `_5000`), or was
+enabled by the human operator with `--enable-roi-name`. Everything else is reported as `name: null`.
+Returned names are canonical spellings, never a copy of arbitrary input. The interpreted type is returned only
+when it is one of the DICOM enumerated code strings. Structure set labels, observation labels, ROI descriptions
+and absolute contour coordinates are never returned.
+
+*Covers T9.*
+
 ## 6. Acknowledged limits
 
 These belong in the README and must not be hidden:
@@ -143,6 +155,11 @@ These belong in the README and must not be hidden:
   process or the MCP client are outside the tool output. Do not assume those logs are free of file content.
 - `dicom_scan_directory` returns folder and file names relative to the root by default. Use `opaque_paths=true`
   to omit them. Folder names are chosen by the user and may contain identifiers.
+- Planar-contour volumes in `rt_structure_summary` are approximations (net slice area times median slice spacing,
+  nested contours treated as holes). They are not clinical volumes and are not validated against a treatment
+  planning system.
+- The standard structure-name list is a partial, hand-written subset. Valid structure names that are not on it
+  (for example in Indonesian) are redacted until the operator enables them.
 - Only DICOM Part 10 files (with the "DICM" preamble and a transfer syntax in the file meta) are recognised.
   Older files without a preamble are reported as non-DICOM.
 
@@ -161,6 +178,7 @@ Each rule maps to at least one automated test. A tool is not merged without its 
 | R7 | Static check that the codebase imports no write/network APIs in the server package |
 | R8 | A directory exceeding the limits returns a bounded, truncated result with a clear flag |
 | R9 | The pre-commit script blocks a synthetic DICOM file with no extension |
+| R10 | Names with extra text (`PTV_Budi`) are redacted; returned names never echo raw input; operator-enabled names pass |
 
 ## 8. Review
 
@@ -180,5 +198,6 @@ existing tool changes. Record changes in the commit message and in this file's s
 | R7 | read-only tools; tripwire on source | `test_static_rules.py`, `test_server.py` |
 | R8 | `config.py`, `security/paths.py` | `test_security_paths.py`, `test_dicom_tools.py` |
 | R9 | `.gitignore`, `scripts/check_no_medical_images.py`, CI step on tracked files | `test_precommit_guard.py` |
+| R10 | `security/roi_names.py`, `tools/rt.py` | `test_roi_names.py`, `test_rt_tools.py`, `test_server.py` |
 
 The guard script is tested directly. CI also runs it over every tracked file, so a commit made with `--no-verify` is still caught after the push (the data would already be in the history, so the hook remains the primary defence).

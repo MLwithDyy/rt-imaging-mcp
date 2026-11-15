@@ -48,3 +48,14 @@ def test_non_positive_limits_rejected(root: Path, field: str) -> None:
 def test_negative_depth_rejected(root: Path) -> None:
     with pytest.raises(ConfigError):
         Config.from_root(root, max_depth=-1)
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "x" * 65])
+def test_invalid_extra_roi_names_rejected(root: Path, bad: str) -> None:
+    with pytest.raises(ConfigError):
+        Config.from_root(root, extra_roi_names=frozenset({bad}))
+
+
+def test_extra_roi_names_accepted(root: Path) -> None:
+    config = Config.from_root(root, extra_roi_names=frozenset({"Rectum_Spare"}))
+    assert config.extra_roi_names == frozenset({"Rectum_Spare"})

@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import nibabel as nib
 import numpy as np
 from pydicom.dataset import Dataset, FileMetaDataset
-from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
+from pydicom.sequence import Sequence as DicomSequence
+from pydicom.uid import (
+    CTImageStorage,
+    ExplicitVRLittleEndian,
+    RTStructureSetStorage,
+    generate_uid,
+)
 
 FAKE_NAME = "SYNTHNAME^FAKE^ZZ"
 FAKE_ID = "SYNTHID-0001"
@@ -96,3 +104,86 @@ def write_nifti(path: Path, shape: tuple[int, ...] = (4, 5, 6), gz: bool = False
     target = path.with_suffix(".nii.gz") if gz else path.with_suffix(".nii")
     nib.save(image, str(target))
     return target
+
+
+FAKE_STRUCT_LABEL = "SYNTHSTRUCTLABEL"
+FAKE_ROI_NAME = "SYNTHROI_Budi"
+FAKE_OBS_LABEL = "SYNTHOBSLABEL"
+RT_IDENTIFYING_VALUES = (*IDENTIFYING_VALUES, FAKE_STRUCT_LABEL, FAKE_ROI_NAME, FAKE_OBS_LABEL)
+
+Point2D = tuple[float, float]
+
+
+@dataclass
+class RoiSpec:
+    """One synthetic structure: contours are (z, [x, y points]) tuples."""
+
+    number: int
+    name: str
+    interpreted_type: str = "ORGAN"
+    algorithm: str = "MANUAL"
+    contours: list[tuple[float, list[Point2D]]] = field(default_factory=list)
+
+
+def square(x0: float, y0: float, size: float) -> list[Point2D]:
+    return [(x0, y0), (x0 + size, y0), (x0 + size, y0 + size), (x0, y0 + size)]
+
+
+def extrude(polygon: list[Point2D], z_values: Sequence[float]) -> list[tuple[float, list[Point2D]]]:
+    """The same polygon on every listed slice."""
+    return [(z, polygon) for z in z_values]
+
+
+def build_rtstruct_dataset(rois: Sequence[RoiSpec]) -> Dataset:
+    ds = Dataset()
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds.file_meta.MediaStorageSOPClassUID = RTStructureSetStorage
+    ds.file_meta.MediaStorageSOPInstanceUID = generate_uid()
+
+    ds.SOPClassUID = RTStructureSetStorage
+    ds.SOPInstanceUID = generate_uid()
+    ds.Modality = "RTSTRUCT"
+    ds.PatientName = FAKE_NAME
+    ds.PatientID = FAKE_ID
+    ds.StructureSetLabel = FAKE_STRUCT_LABEL
+
+    definitions = DicomSequence()
+    contour_items = DicomSequence()
+    observations = DicomSequence()
+    for roi in rois:
+        definition = Dataset()
+        definition.ROINumber = roi.number
+        definition.ROIName = roi.name
+        definition.ROIGenerationAlgorithm = roi.algorithm
+        definitions.append(definition)
+
+        roi_contour = Dataset()
+        roi_contour.ReferencedROINumber = roi.number
+        contour_sequence = DicomSequence()
+        for z, polygon in roi.contours:
+            contour = Dataset()
+            contour.ContourGeometricType = "CLOSED_PLANAR"
+            contour.NumberOfContourPoints = len(polygon)
+            contour.ContourData = [value for x, y in polygon for value in (x, y, z)]
+            contour_sequence.append(contour)
+        if roi.contours:
+            roi_contour.ContourSequence = contour_sequence
+        contour_items.append(roi_contour)
+
+        observation = Dataset()
+        observation.ObservationNumber = roi.number
+        observation.ReferencedROINumber = roi.number
+        observation.RTROIInterpretedType = roi.interpreted_type
+        observation.ROIObservationLabel = FAKE_OBS_LABEL
+        observations.append(observation)
+
+    ds.StructureSetROISequence = definitions
+    ds.ROIContourSequence = contour_items
+    ds.RTROIObservationsSequence = observations
+    return ds
+
+
+def write_rtstruct(path: Path, rois: Sequence[RoiSpec]) -> Path:
+    build_rtstruct_dataset(rois).save_as(path, enforce_file_format=True)
+    return path

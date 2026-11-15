@@ -21,7 +21,7 @@ from rt_imaging_mcp import __version__
 from rt_imaging_mcp.config import ENV_ROOT, Config
 from rt_imaging_mcp.security.allowlist import OPT_IN_KEYWORDS
 from rt_imaging_mcp.security.errors import ConfigError, RtImagingMcpError
-from rt_imaging_mcp.tools import dicom, nifti
+from rt_imaging_mcp.tools import dicom, nifti, rt
 
 INSTRUCTIONS = (
     "Read-only access to local medical image files (DICOM, NIfTI) below one configured "
@@ -112,6 +112,21 @@ def create_server(config: Config) -> MCPServer:
         """
         return nifti.nifti_info(config, path)
 
+    @server.tool(
+        name="rt_structure_summary",
+        title="Summarise an RT structure set",
+        annotations=_READ_ONLY,
+    )
+    @_guard
+    def rt_structure_summary(path: str) -> dict[str, Any]:
+        """Summarise an RTSTRUCT file (path relative to the root): one entry per structure.
+
+        Structure names are returned only when they match a standard name (TG-263 style);
+        other names are redacted. Returns interpreted type, contour and slice counts, extent
+        in mm and an approximate planar-contour volume. No coordinates or free-text labels.
+        """
+        return rt.rt_structure_summary(config, path)
+
     return server
 
 
@@ -133,6 +148,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable an opt-in DICOM keyword (for example StudyDescription). Can be repeated. "
         "These attributes may contain identifiers; enable them only for de-identified data.",
     )
+    parser.add_argument(
+        "--enable-roi-name",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Also return this structure name (exact match, case-insensitive). Can be repeated. "
+        "Structure names can contain identifiers; enable names only for de-identified data.",
+    )
     parser.add_argument("--max-files", type=int, default=Config.max_files)
     parser.add_argument("--max-depth", type=int, default=Config.max_depth)
     parser.add_argument("--max-file-mb", type=int, default=Config.max_file_bytes // (1024 * 1024))
@@ -148,6 +171,7 @@ def config_from_args(args: argparse.Namespace) -> Config:
         "max_depth": args.max_depth,
         "max_file_bytes": args.max_file_mb * 1024 * 1024,
         "enabled_opt_in_tags": frozenset(args.enable_tag),
+        "extra_roi_names": frozenset(args.enable_roi_name),
     }
     if args.root:
         return Config.from_root(args.root, **overrides)

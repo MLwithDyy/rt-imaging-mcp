@@ -13,13 +13,23 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from rt_imaging_mcp.config import Config
 from rt_imaging_mcp.server import build_parser, config_from_args, create_server
-from tests.synthetic import IDENTIFYING_VALUES, write_dicom, write_nifti
+from tests.synthetic import (
+    FAKE_ROI_NAME,
+    RT_IDENTIFYING_VALUES,
+    RoiSpec,
+    extrude,
+    square,
+    write_dicom,
+    write_nifti,
+    write_rtstruct,
+)
 
 EXPECTED_TOOLS = {
     "dicom_scan_directory",
     "dicom_get_metadata",
     "dicom_list_allowed_tags",
     "nifti_info",
+    "rt_structure_summary",
 }
 
 
@@ -53,6 +63,11 @@ def server(root: Path) -> MCPServer:
     (root / "PatientFolderBudi").mkdir()
     write_dicom(root / "PatientFolderBudi" / "IM0001")
     write_nifti(root / "vol")
+    rois = [
+        RoiSpec(1, "PTV", "PTV", "MANUAL", extrude(square(0, 0, 10), [0.0, 1.0, 2.0])),
+        RoiSpec(2, FAKE_ROI_NAME, "ORGAN", "MANUAL", extrude(square(0, 0, 4), [0.0, 1.0])),
+    ]
+    write_rtstruct(root / "struct.dcm", rois)
     return create_server(Config.from_root(root))
 
 
@@ -76,10 +91,11 @@ def test_no_tool_output_contains_identifiers_or_pixels(server: MCPServer, root: 
         call(server, "dicom_get_metadata", {"path": "PatientFolderBudi/IM0001"}),
         call(server, "dicom_list_allowed_tags", {}),
         call(server, "nifti_info", {"path": "vol.nii"}),
+        call(server, "rt_structure_summary", {"path": "struct.dcm"}),
     ]
     for output in outputs:
         text = result_text(output)
-        for value in IDENTIFYING_VALUES:
+        for value in RT_IDENTIFYING_VALUES:
             assert value not in text
         assert str(root) not in text
         assert len(text) < 10_000
@@ -92,6 +108,8 @@ def test_error_results_are_static_and_do_not_leak(server: MCPServer, root: Path)
         ("dicom_get_metadata", {"path": "PatientFolderBudi/IM0001", "keywords": ["PatientName"]}),
         ("dicom_get_metadata", {"path": "vol.nii"}),
         ("nifti_info", {"path": "PatientFolderBudi/IM0001"}),
+        ("rt_structure_summary", {"path": "PatientFolderBudi/IM0001"}),
+        ("rt_structure_summary", {"path": "../struct.dcm"}),
     ]
     for name, arguments in cases:
         with pytest.raises(ToolError) as info:
@@ -99,7 +117,7 @@ def test_error_results_are_static_and_do_not_leak(server: MCPServer, root: Path)
         message = str(info.value)
         assert str(root) not in message
         assert "SecretPatientName" not in message
-        for value in IDENTIFYING_VALUES:
+        for value in RT_IDENTIFYING_VALUES:
             assert value not in message
 
 
@@ -125,7 +143,8 @@ def test_unexpected_exceptions_are_replaced_by_a_static_message(
 
 def test_server_works_through_scan_then_metadata(server: MCPServer) -> None:
     scan = call(server, "dicom_scan_directory", {}).structured_content
-    first_file = scan["series"][0]["first_file"]
+    ct_series = next(item for item in scan["series"] if item["modality"] == "CT")
+    first_file = ct_series["first_file"]
     meta = call(server, "dicom_get_metadata", {"path": first_file}).structured_content
     assert meta["metadata"]["Modality"] == "CT"
 
@@ -146,6 +165,19 @@ def test_parser_rejects_unknown_or_blocked_opt_in_tags(root: Path) -> None:
         args = build_parser().parse_args(["--root", str(root), "--enable-tag", tag])
         with pytest.raises(ConfigError):
             config_from_args(args)
+
+
+def test_parser_accepts_roi_names(root: Path) -> None:
+    args = build_parser().parse_args(["--root", str(root), "--enable-roi-name", "Rectum_Spare"])
+    assert config_from_args(args).extra_roi_names == frozenset({"Rectum_Spare"})
+
+
+def test_rt_summary_through_server_shows_redaction(server: MCPServer) -> None:
+    summary = call(server, "rt_structure_summary", {"path": "struct.dcm"}).structured_content
+    by_number = {roi["roi_number"]: roi for roi in summary["rois"]}
+    assert by_number[1]["name"] == "PTV"
+    assert by_number[2]["name"] is None
+    assert by_number[2]["name_redacted"] is True
 
 
 def test_parser_accepts_valid_opt_in_tag(root: Path) -> None:
