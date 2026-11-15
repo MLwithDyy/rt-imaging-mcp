@@ -1,5 +1,6 @@
-[![CI](https://github.com/MLwithDyy/rt-imaging-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MLwithDyy/rt-imaging-mcp/actions/workflows/ci.yml)
 # rt-imaging-mcp
+
+[![CI](https://github.com/MLwithDyy/rt-imaging-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MLwithDyy/rt-imaging-mcp/actions/workflows/ci.yml)
 
 A local, read-only [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI agents
 inspect medical image files (DICOM, NIfTI) on your own disk, with PHI-safe output by default.
@@ -100,7 +101,7 @@ and a pre-commit hook. Do not attach real patient data to issues or pull request
 ## Roadmap
 
 1. DICOM and NIfTI basics (done, pre-alpha)
-2. CI on Python 3.11-3.13
+2. CI on Python 3.11-3.13, Linux and Windows (done)
 3. Radiotherapy objects: RTSTRUCT, RTDOSE, RTPLAN summaries and simple DVH metrics
 4. Radiomics feature extraction with validation against IBSI reference data
 5. Release to PyPI
