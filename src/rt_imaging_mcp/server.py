@@ -21,7 +21,7 @@ from rt_imaging_mcp import __version__
 from rt_imaging_mcp.config import ENV_ROOT, Config
 from rt_imaging_mcp.security.allowlist import OPT_IN_KEYWORDS
 from rt_imaging_mcp.security.errors import ConfigError, RtImagingMcpError
-from rt_imaging_mcp.tools import dicom, nifti, rt, rt_dose, rt_plan
+from rt_imaging_mcp.tools import dicom, nifti, rt, rt_dose, rt_dvh, rt_plan
 
 INSTRUCTIONS = (
     "Read-only access to local medical image files (DICOM, NIfTI) below one configured "
@@ -155,6 +155,31 @@ def create_server(config: Config) -> MCPServer:
         names and other free text are never returned.
         """
         return rt_plan.rt_plan_summary(config, path)
+
+    @server.tool(
+        name="rt_dvh_metrics",
+        title="Dose-volume metrics for one structure",
+        annotations=_READ_ONLY,
+    )
+    @_guard
+    def rt_dvh_metrics(
+        struct_path: str,
+        dose_path: str,
+        roi_number: int,
+        dose_percentages: list[float] | None = None,
+        volume_thresholds_gy: list[float] | None = None,
+    ) -> dict[str, Any]:
+        """Dose statistics and D/V metrics for one structure (paths relative to the root).
+
+        Combines an RTSTRUCT and an RTDOSE that share a frame of reference. Use
+        rt_structure_summary to find roi_number. dose_percentages gives D(p), the highest dose
+        that at least p percent of the volume receives (default 95, 50, 2). volume_thresholds_gy
+        gives V(t), the volume receiving at least t Gy (default 20). Results are approximate
+        (voxel centres, nearest contour slice) and not validated against a planning system.
+        """
+        return rt_dvh.rt_dvh_metrics(
+            config, struct_path, dose_path, roi_number, dose_percentages, volume_thresholds_gy
+        )
 
     return server
 
