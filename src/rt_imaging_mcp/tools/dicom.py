@@ -25,7 +25,7 @@ _DICOM_MAGIC = b"DICM"
 _SCAN_TAGS = ["Modality", "SeriesInstanceUID", "Rows", "Columns"]
 
 
-def _has_dicom_preamble(path: Path) -> bool:
+def has_dicom_preamble(path: Path) -> bool:
     """True when the file has the DICOM Part 10 preamble ("DICM" at byte 128)."""
     try:
         with path.open("rb") as handle:
@@ -35,7 +35,7 @@ def _has_dicom_preamble(path: Path) -> bool:
         return False
 
 
-def _read_header(path: Path, specific_tags: list[str] | None = None) -> Any:
+def read_header(path: Path, specific_tags: list[str] | None = None) -> Any:
     """Read a DICOM header without pixel data. Any failure becomes a static error."""
     try:
         header = pydicom.dcmread(path, stop_before_pixels=True, specific_tags=specific_tags)
@@ -80,11 +80,11 @@ def dicom_scan_directory(
         except OSError:
             other_files += 1
             continue
-        if not _has_dicom_preamble(file):
+        if not has_dicom_preamble(file):
             other_files += 1
             continue
         try:
-            header = _read_header(file, _SCAN_TAGS)
+            header = read_header(file, _SCAN_TAGS)
         except NotDicomError:
             unreadable += 1
             continue
@@ -154,11 +154,11 @@ def dicom_get_metadata(
     file = resolve_in_root(config.root, path, kind="file")
     if file.stat().st_size > config.max_file_bytes:
         raise FileTooLargeError()
-    if not _has_dicom_preamble(file):
+    if not has_dicom_preamble(file):
         raise NotDicomError()
 
     allowed = resolve_keywords(keywords, config.enabled_opt_in_tags)
-    header = _read_header(file)
+    header = read_header(file)
     return {"metadata": filter_dataset(header, allowed)}
 
 

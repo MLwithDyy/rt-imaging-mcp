@@ -5,8 +5,8 @@
 A local, read-only [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI agents
 inspect medical image files (DICOM, NIfTI) on your own disk, with PHI-safe output by default.
 
-> **Status: early development (pre-alpha).** DICOM scanning, allowlisted DICOM metadata and NIfTI header
-> information work today. Radiotherapy objects (RTSTRUCT, RTDOSE, RTPLAN) and radiomics are planned, not implemented.
+> **Status: early development (pre-alpha).** DICOM scanning, allowlisted DICOM metadata, NIfTI header
+> information and RTSTRUCT summaries work today. RTDOSE, RTPLAN, DVH metrics and radiomics are planned, not implemented.
 
 ## Read this first
 
@@ -24,6 +24,7 @@ inspect medical image files (DICOM, NIfTI) on your own disk, with PHI-safe outpu
 | `dicom_get_metadata` | Allowlisted technical attributes of one DICOM file (geometry, bit depth, modality, transfer syntax, ...). |
 | `dicom_list_allowed_tags` | The attribute keywords `dicom_get_metadata` may currently return. |
 | `nifti_info` | Shape, voxel size, data type, units and orientation from the NIfTI header. Free-text header fields are never returned. |
+| `rt_structure_summary` | One entry per RTSTRUCT structure: interpreted type, contour and slice counts, extent, approximate planar volume. Names are returned only if standard (TG-263 style), otherwise `null`. |
 
 All tools are read-only and are declared as such to the client.
 
@@ -32,6 +33,8 @@ All tools are read-only and are declared as such to the client.
 - **Tag allowlist.** Only listed attributes can be returned. Patient name, ID, birth date, institution, physician names,
   accession number, private tags and similar are blocked and cannot be enabled. Dates, descriptions and UIDs are
   off by default and need an explicit `--enable-tag` by the human operator (not the agent).
+- **Structure names are standardised.** RTSTRUCT names are free text and can contain identifiers, so only standard
+  names (a TG-263-style subset) and fixed-token target names such as `PTV_High` are returned; others are `null`.
 - **No pixel data**, ever.
 - **One root directory.** The server refuses to start without `--root` (or `RT_IMAGING_MCP_ROOT`). `..`, absolute paths
   outside the root and symlinks that leave the root are rejected.
@@ -53,7 +56,8 @@ uv sync
 uv run rt-imaging-mcp --root /path/to/de-identified/images
 ```
 
-Options: `--enable-tag KEYWORD` (repeatable, opt-in attributes), `--max-files`, `--max-depth`, `--max-file-mb`.
+Options: `--enable-tag KEYWORD` (repeatable, opt-in DICOM attributes), `--enable-roi-name NAME` (repeatable, extra
+structure names to return), `--max-files`, `--max-depth`, `--max-file-mb`.
 
 ### Claude Code
 
@@ -102,7 +106,7 @@ and a pre-commit hook. Do not attach real patient data to issues or pull request
 
 1. DICOM and NIfTI basics (done, pre-alpha)
 2. CI on Python 3.11-3.13, Linux and Windows (done)
-3. Radiotherapy objects: RTSTRUCT, RTDOSE, RTPLAN summaries and simple DVH metrics
+3. Radiotherapy objects: RTSTRUCT summary (done), RTDOSE and RTPLAN summaries, simple DVH metrics
 4. Radiomics feature extraction with validation against IBSI reference data
 5. Release to PyPI
 

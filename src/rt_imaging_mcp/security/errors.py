@@ -51,3 +51,7 @@ class NotDicomError(RtImagingMcpError):
 
 class NotNiftiError(RtImagingMcpError):
     message = "file is not a readable NIfTI file"
+
+
+class NotRtStructError(RtImagingMcpError):
+    message = "file is not a readable RT structure set"
