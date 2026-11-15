@@ -1,6 +1,6 @@
 # Threat Model
 
-Status: draft v0.1. Every rule in "Hard rules" must be enforced in code and covered by an automated test
+Status: draft v0.2 (rules R1-R8 implemented and tested for the first three tools). Every rule in "Hard rules" must be enforced in code and covered by an automated test
 before the tool that depends on it is merged.
 
 ## 1. Purpose and scope
@@ -137,6 +137,14 @@ These belong in the README and must not be hidden:
 - Radiomics features derived from images can carry information about a patient and are returned as is.
 - For full privacy, use a locally hosted model so that no tool output leaves the machine.
 - This project is for research and education only. It is not a medical device.
+- Path checks resolve a path and then use it. A symlink swapped in between the check and the read (time-of-check
+  to time-of-use race) is not prevented. Run the server on a directory that untrusted parties cannot modify.
+- Tool results never contain data from files in error messages (R6), but logs written to stderr by the server
+  process or the MCP client are outside the tool output. Do not assume those logs are free of file content.
+- `dicom_scan_directory` returns folder and file names relative to the root by default. Use `opaque_paths=true`
+  to omit them. Folder names are chosen by the user and may contain identifiers.
+- Only DICOM Part 10 files (with the "DICM" preamble and a transfer syntax in the file meta) are recognised.
+  Older files without a preamble are reported as non-DICOM.
 
 ## 7. Test mapping
 
@@ -158,3 +166,19 @@ Each rule maps to at least one automated test. A tool is not merged without its 
 
 Revisit this document whenever a new tool is added, a new file format is supported, or the output of an
 existing tool changes. Record changes in the commit message and in this file's status line.
+
+## 9. Implementation status
+
+| Rule | Enforced in | Tests |
+|---|---|---|
+| R1 | `security/allowlist.py`, `config.py` | `test_security_allowlist.py`, `test_dicom_tools.py`, `test_server.py` |
+| R2 | tools never read pixel data or NIfTI arrays | `test_security_allowlist.py`, `test_nifti_tools.py`, `test_server.py` |
+| R3 | `security/paths.py`, `config.py` | `test_security_paths.py`, `test_config.py` |
+| R4 | `security/paths.py`, `tools/dicom.py` | `test_security_paths.py`, `test_dicom_tools.py`, `test_server.py` |
+| R5 | free-text fields off by default (R1); documented limit | `test_security_allowlist.py`, `test_nifti_tools.py` |
+| R6 | `security/errors.py`, `server.py` | `test_server.py`, `test_nifti_tools.py`, `test_security_paths.py` |
+| R7 | read-only tools; tripwire on source | `test_static_rules.py`, `test_server.py` |
+| R8 | `config.py`, `security/paths.py` | `test_security_paths.py`, `test_dicom_tools.py` |
+| R9 | `.gitignore`, `scripts/check_no_medical_images.py` | manual check of the hook (see README) |
+
+R9 is not yet covered by an automated test in CI.

@@ -1,18 +1,113 @@
 # rt-imaging-mcp
 
-A local, file-based [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI agents
-inspect medical images (DICOM, NIfTI) and radiotherapy objects, with PHI-safe output by default.
+A local, read-only [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI agents
+inspect medical image files (DICOM, NIfTI) on your own disk, with PHI-safe output by default.
 
-> **Status: early development (Phase 0).** Nothing is implemented yet. See [docs/threat-model.md](docs/threat-model.md)
-> for the design constraints every tool must satisfy.
+> **Status: early development (pre-alpha).** DICOM scanning, allowlisted DICOM metadata and NIfTI header
+> information work today. Radiotherapy objects (RTSTRUCT, RTDOSE, RTPLAN) and radiomics are planned, not implemented.
 
-## Important
+## Read this first
 
 - **Research use only. Not a medical device. Not for clinical use.**
-- Running the server locally does **not** by itself keep data private: tool output is sent to the model
-  the MCP client uses. If that model is hosted in the cloud, so is every tool result.
-  See the threat model for how this project limits what tools return.
-- Never use real patient data for development or testing.
+- Running locally does **not** by itself keep data private. Tool output is sent to the model your MCP client
+  uses. If that model is hosted in the cloud, so is every tool result. This project limits what tools return
+  (see [docs/threat-model.md](docs/threat-model.md)) but cannot guarantee anonymity.
+- For full privacy, use a locally hosted model. Never use real patient data for development or testing.
+
+## Tools
+
+| Tool | What it returns |
+|---|---|
+| `dicom_scan_directory` | Inventory of DICOM series below a directory: opaque series ids, modality, instance counts, image size, file counts. No UIDs. |
+| `dicom_get_metadata` | Allowlisted technical attributes of one DICOM file (geometry, bit depth, modality, transfer syntax, ...). |
+| `dicom_list_allowed_tags` | The attribute keywords `dicom_get_metadata` may currently return. |
+| `nifti_info` | Shape, voxel size, data type, units and orientation from the NIfTI header. Free-text header fields are never returned. |
+
+All tools are read-only and are declared as such to the client.
+
+## Safety design
+
+- **Tag allowlist.** Only listed attributes can be returned. Patient name, ID, birth date, institution, physician names,
+  accession number, private tags and similar are blocked and cannot be enabled. Dates, descriptions and UIDs are
+  off by default and need an explicit `--enable-tag` by the human operator (not the agent).
+- **No pixel data**, ever.
+- **One root directory.** The server refuses to start without `--root` (or `RT_IMAGING_MCP_ROOT`). `..`, absolute paths
+  outside the root and symlinks that leave the root are rejected.
+- **Static error messages.** Errors never quote data read from files.
+- **Bounded work.** Limits on file count, directory depth and file size.
+- **No writes, no network.** Enforced by a static test on the source.
+
+Known limits are listed in the threat model. In short: file and folder names are controlled by you and can contain
+identifiers (use `opaque_paths=true` to omit them), and prompt injection through file content cannot be fully prevented.
+
+## Install and run
+
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+
+```bash
+git clone https://github.com/MLwithDyy/rt-imaging-mcp
+cd rt-imaging-mcp
+uv sync
+uv run rt-imaging-mcp --root /path/to/de-identified/images
+```
+
+Options: `--enable-tag KEYWORD` (repeatable, opt-in attributes), `--max-files`, `--max-depth`, `--max-file-mb`.
+
+### Claude Code
+
+```bash
+claude mcp add rt-imaging -- uv run --directory /path/to/rt-imaging-mcp rt-imaging-mcp --root /path/to/images
+```
+
+### Claude Desktop (and other clients using a JSON config)
+
+```json
+{
+  "mcpServers": {
+    "rt-imaging": {
+      "command": "uv",
+      "args": [
+        "run", "--directory", "/path/to/rt-imaging-mcp",
+        "rt-imaging-mcp", "--root", "/path/to/images"
+      ]
+    }
+  }
+}
+```
+
+On Windows, escape backslashes in JSON (`D:\\Project\\rt-imaging-mcp`) or use forward slashes.
+
+Debug with the MCP Inspector:
+
+```bash
+npx @modelcontextprotocol/inspector uv run rt-imaging-mcp --root /path/to/images
+```
+
+## Development
+
+```bash
+uv sync
+uv run pytest
+uv run ruff check .
+uv run mypy
+pre-commit install
+```
+
+Tests use synthetic data generated at run time. Medical image files are blocked from commits by `.gitignore`
+and a pre-commit hook. Do not attach real patient data to issues or pull requests.
+
+## Roadmap
+
+1. DICOM and NIfTI basics (done, pre-alpha)
+2. CI on Python 3.11-3.13
+3. Radiotherapy objects: RTSTRUCT, RTDOSE, RTPLAN summaries and simple DVH metrics
+4. Radiomics feature extraction with validation against IBSI reference data
+5. Release to PyPI
+
+## Related work
+
+[`dicom-mcp`](https://github.com/ChristianHinge/dicom-mcp) connects agents to DICOM network servers (PACS). This project
+is complementary: it works on local files and focuses on PHI-safe output, radiotherapy objects and radiomics.
 
 ## License
 
