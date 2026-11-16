@@ -53,6 +53,12 @@ All tools are read-only and are declared as such to the client.
 Known limits are listed in the threat model. In short: file and folder names are controlled by you and can contain
 identifiers (use `opaque_paths=true` to omit them), and prompt injection through file content cannot be fully prevented.
 
+## Validation
+
+Dose-volume metrics are checked against hand-calculated phantoms and against dicompyler-core on synthetic data.
+They are **not** validated against a treatment planning system or real patient data yet.
+See [docs/validation.md](docs/validation.md) for the numbers, the differences and how to reproduce them.
+
 ## Install and run
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
@@ -122,6 +128,11 @@ and a pre-commit hook. Do not attach real patient data to issues or pull request
 
 [`dicom-mcp`](https://github.com/ChristianHinge/dicom-mcp) connects agents to DICOM network servers (PACS). This project
 is complementary: it works on local files and focuses on PHI-safe output, radiotherapy objects and radiomics.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Never attach real patient data to issues or pull requests.
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
 

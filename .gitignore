@@ -11,6 +11,7 @@ DICOMDIR
 data/
 private/
 patient_data/
+phantoms/
 
 # --- Python ---
 __pycache__/
