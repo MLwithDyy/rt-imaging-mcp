@@ -69,7 +69,7 @@ def dicom_scan_directory(
     start = resolve_in_root(config.root, directory, kind="dir")
     walk = walk_files(start, config.root, max_depth=config.max_depth, max_files=config.max_files)
 
-    groups: dict[tuple[str, str], _Series] = {}
+    groups: dict[tuple[str, str, str], _Series] = {}
     dicom_files = other_files = unreadable = too_large = 0
 
     for file in walk.files:
@@ -91,12 +91,13 @@ def dicom_scan_directory(
 
         dicom_files += 1
         series_uid = str(header.get("SeriesInstanceUID", "") or "")
-        key = (str(file.parent), series_uid)
+        modality = to_jsonable(header.get("Modality"))
+        # The modality is part of the key: files without a series UID never merge across modalities.
+        key = (str(file.parent), series_uid, modality if isinstance(modality, str) else "")
         existing = groups.get(key)
         if existing is not None:
             existing.count += 1
             continue
-        modality = to_jsonable(header.get("Modality"))
         rows = to_jsonable(header.get("Rows"))
         columns = to_jsonable(header.get("Columns"))
         groups[key] = _Series(

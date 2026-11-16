@@ -193,3 +193,16 @@ def test_list_allowed_tags(populated: Path) -> None:
     assert "Modality" in result["default"]
     assert "PatientName" not in result["default"]
     assert result["enabled_opt_in"] == ["StudyDate"]
+
+
+def test_scan_never_merges_different_modalities_without_series_uids(root: Path) -> None:
+    """RT files carry no SeriesInstanceUID in the synthetic data; they must still stay apart."""
+    import numpy as np
+
+    from tests.synthetic import RoiSpec, write_rtdose, write_rtstruct
+
+    write_rtstruct(root / "struct.dcm", [RoiSpec(1, "PTV")])
+    write_rtdose(root / "dose.dcm", np.ones((2, 2, 2)))
+    result = dicom_scan_directory(Config.from_root(root))
+    assert sorted(item["modality"] for item in result["series"]) == ["RTDOSE", "RTSTRUCT"]
+    assert all(item["instance_count"] == 1 for item in result["series"])

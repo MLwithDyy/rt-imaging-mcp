@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rt-imaging-mcp"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Local, file-based MCP server for medical images and radiotherapy objects with PHI-safe output."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Mahdy Firmansyah" }]
-keywords = ["mcp", "dicom", "nifti", "radiotherapy", "radiomics", "medical-imaging"]
+keywords = ["mcp", "dicom", "nifti", "radiotherapy", "medical-imaging", "dose-volume-histogram"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Science/Research",
@@ -31,7 +31,10 @@ dependencies = [
 rt-imaging-mcp = "rt_imaging_mcp.server:main"
 
 [project.urls]
+Homepage = "https://github.com/MLwithDyy/rt-imaging-mcp"
 Repository = "https://github.com/MLwithDyy/rt-imaging-mcp"
+Issues = "https://github.com/MLwithDyy/rt-imaging-mcp/issues"
+Changelog = "https://github.com/MLwithDyy/rt-imaging-mcp/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
@@ -41,6 +44,9 @@ dev = [
     "mypy>=1.11",
     "numpy",
 ]
+
+[tool.hatch.version]
+path = "src/rt_imaging_mcp/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rt_imaging_mcp"]
