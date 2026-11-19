@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -9,52 +11,86 @@ from rt_imaging_mcp.dvh import (
     dose_at_volume,
     dvh_metrics,
     format_number,
-    nearest_slice_indices,
+    slice_contributions,
     volume_at_dose,
 )
 
-# ---------------------------------------------------------------- slice mapping
+# ------------------------------------------------------- slice contributions (overlap weights)
 
 
-def test_aligned_slices_map_one_to_one() -> None:
-    assert nearest_slice_indices([0, 2, 4, 6], [0, 2, 4, 6], 2.0) == [0, 1, 2, 3]
+def approx_entries(entries: list[list[tuple[int, float]]]) -> list[list[tuple[int, Any]]]:
+    return [[(index, pytest.approx(weight)) for index, weight in row] for row in entries]
 
 
-def test_misaligned_slices_use_the_nearest_contour_slab() -> None:
-    result = nearest_slice_indices([0, 2, 4, 6, 8, 10, 12], [0, 3, 6, 9], 3.0)
-    assert result == [0, 1, 1, 2, 3, 3, None]
+def test_equal_spacing_aligned_slices_have_full_weights() -> None:
+    result = slice_contributions([0, 2, 4, 6], 2.0, [0, 2, 4, 6], 2.0)
+    assert result == approx_entries([[(0, 1.0)], [(1, 1.0)], [(2, 1.0)], [(3, 1.0)]])
+
+
+def test_planes_between_slabs_are_shared_and_planes_on_the_outer_boundary_count_half() -> None:
+    """Contours 3 mm apart (slabs from -1.5 to 7.5) and dose planes every 1.5 mm."""
+    planes = [-1.5, 0.0, 1.5, 3.0, 4.5, 6.0, 7.5]
+    result = slice_contributions(planes, 1.5, [0, 3, 6], 3.0)
+    assert result == approx_entries(
+        [
+            [(0, 0.5)],
+            [(0, 1.0)],
+            [(0, 0.5), (1, 0.5)],
+            [(1, 1.0)],
+            [(1, 0.5), (2, 0.5)],
+            [(2, 1.0)],
+            [(2, 0.5)],
+        ]
+    )
+
+
+def test_misaligned_slices_share_by_overlap() -> None:
+    result = slice_contributions([0, 2, 4, 6, 8, 10, 12], 2.0, [0, 3, 6, 9], 3.0)
+    assert result == approx_entries(
+        [
+            [(0, 1.0)],
+            [(0, 0.25), (1, 0.75)],
+            [(1, 0.75), (2, 0.25)],
+            [(2, 1.0)],
+            [(2, 0.25), (3, 0.75)],
+            [(3, 0.75)],
+            [],
+        ]
+    )
 
 
 def test_slices_beyond_the_ends_are_outside() -> None:
-    assert nearest_slice_indices([-4, -1.5, 0, 6, 7.5, 9], [0, 3, 6], 3.0) == [
-        None,
-        0,
-        0,
-        2,
-        2,
-        None,
-    ]
+    assert slice_contributions([-4.0, 12.0], 2.0, [0, 3, 6, 9], 3.0) == [[], []]
 
 
 def test_gap_larger_than_one_slab_is_not_bridged() -> None:
-    assert nearest_slice_indices([0, 2, 4, 6, 8, 10, 12], [0, 2, 4, 12], 2.0) == [
-        0,
-        1,
-        2,
-        None,
-        None,
-        None,
-        3,
-    ]
+    result = slice_contributions([0, 2, 4, 6, 8, 10, 12], 2.0, [0, 2, 4, 12], 2.0)
+    assert result == approx_entries([[(0, 1.0)], [(1, 1.0)], [(2, 1.0)], [], [], [], [(3, 1.0)]])
 
 
-def test_tie_goes_to_the_lower_slice() -> None:
-    assert nearest_slice_indices([1.0], [0.0, 2.0], 2.0) == [0]
+def test_overlapping_slabs_never_add_up_to_more_than_one() -> None:
+    result = slice_contributions([1.0], 1.0, [0.0, 1.0, 2.0], 3.0)
+    assert sum(weight for _, weight in result[0]) == pytest.approx(1.0)
 
 
-def test_mapping_does_not_depend_on_dose_slice_order() -> None:
-    ascending = nearest_slice_indices([0, 2, 4, 6], [0, 3, 6], 3.0)
-    descending = nearest_slice_indices([6, 4, 2, 0], [0, 3, 6], 3.0)
+@pytest.mark.parametrize("dose_step", [1.0, 1.5, 2.0, 2.5, 3.0])
+@pytest.mark.parametrize("offset", [0.0, 0.3, 0.75, 1.1])
+def test_every_contour_slab_receives_exactly_its_own_thickness(
+    dose_step: float, offset: float
+) -> None:
+    """However the dose planes fall, the structure volume equals the sum of its slabs."""
+    contour = [3.0 * index for index in range(10)]
+    planes = [-6.0 + offset + dose_step * k for k in range(int(45 / dose_step))]
+    received = [0.0] * len(contour)
+    for entries in slice_contributions(planes, dose_step, contour, 3.0):
+        for index, weight in entries:
+            received[index] += weight * dose_step
+    assert received == pytest.approx([3.0] * len(contour))
+
+
+def test_contributions_do_not_depend_on_dose_slice_order() -> None:
+    ascending = slice_contributions([0, 2, 4, 6, 8, 10], 2.0, [0, 3, 6, 9], 3.0)
+    descending = slice_contributions([10, 8, 6, 4, 2, 0], 2.0, [0, 3, 6, 9], 3.0)
     assert descending == ascending[::-1]
 
 
@@ -158,3 +194,42 @@ def test_uniform_dose_has_equal_metrics() -> None:
 )
 def test_format_number(value: float, text: str) -> None:
     assert format_number(value) == text
+
+
+# ------------------------------------------------------------------ weighted metrics
+
+
+def test_equal_weights_give_exactly_the_unweighted_values() -> None:
+    doses = np.arange(1, 1001, dtype=float)
+    ones = np.ones_like(doses)
+    for step in range(1, 1001):
+        percent = step / 10.0
+        assert dose_at_volume(doses, percent, ones) == dose_at_volume(doses, percent)
+
+
+def test_weighted_percentiles_and_volume() -> None:
+    doses = np.array([10.0, 20.0, 30.0])
+    weights = np.array([1.0, 2.0, 1.0])  # total weight 4
+    assert dose_at_volume(doses, 25.0, weights) == 30.0
+    assert dose_at_volume(doses, 50.0, weights) == 20.0
+    assert dose_at_volume(doses, 75.0, weights) == 20.0
+    assert dose_at_volume(doses, 100.0, weights) == 10.0
+    assert volume_at_dose(doses, 20.0, weights) == 3.0
+    assert volume_at_dose(doses, 25.0, weights) == 1.0
+
+
+def test_metrics_with_weights() -> None:
+    doses = np.array([30.0, 10.0, 20.0])  # unsorted on purpose
+    weights = np.array([1.0, 1.0, 2.0])
+    result = dvh_metrics(doses, 1000.0, [50.0], [20.0], weights)
+    assert result["dose_gy"] == {"min": 10.0, "max": 30.0, "mean": 20.0}
+    assert result["d_metrics_gy"] == {"D50": 20.0}
+    assert result["v_metrics"]["V20Gy"] == {"percent": 75.0, "volume_cm3": 3.0}
+
+
+def test_partially_covered_end_voxels_count_only_with_their_weight() -> None:
+    doses = np.array([1.0, 2.0, 3.0, 4.0])
+    weights = np.array([0.5, 1.0, 1.0, 0.5])
+    result = dvh_metrics(doses, 1000.0, [], [2.0], weights)
+    assert result["dose_gy"]["mean"] == pytest.approx(2.5)
+    assert result["v_metrics"]["V2Gy"]["volume_cm3"] == pytest.approx(2.5)

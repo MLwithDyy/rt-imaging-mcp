@@ -6,12 +6,15 @@ returned (R11).
 
 Method (approximate, not validated against a treatment planning system):
 
-* A dose voxel belongs to the structure when its centre lies inside the structure's
-  contours on the contour slice that covers it. Nested contours on one slice are holes
-  (even-odd rule). There is no partial-volume weighting.
-* Each contour slice represents a slab as thick as the median contour slice spacing.
-  A dose slice uses the nearest contour slice if it lies inside that slab, otherwise it
-  is outside the structure. Contour gaps larger than one slab stay gaps.
+* A dose voxel belongs to a contour slice when its centre lies inside that slice's contours.
+  Nested contours on one slice are holes (even-odd rule). There is no partial-volume weighting
+  inside a slice.
+* Each contour slice represents a slab as thick as the median contour slice spacing, and each
+  dose slice a slab as thick as the dose slice spacing. The weight of a voxel is the sum, over
+  the contour slices that contain it, of the fraction of its dose slab that overlaps that
+  contour slab. A dose plane exactly between two contour slices therefore takes half from each,
+  a plane on the outer boundary of the structure counts half, and a plane outside counts 0.
+  Contour gaps larger than one slab stay gaps.
 * The dose grid must be axis aligned (orientation 1,0,0,0,1,0), in Gy, with at least two
   uniformly spaced slices, and must share its frame of reference with the structure set.
 """
@@ -24,7 +27,7 @@ from typing import Any
 import numpy as np
 
 from rt_imaging_mcp.config import Config
-from rt_imaging_mcp.dvh import dvh_metrics, nearest_slice_indices
+from rt_imaging_mcp.dvh import dvh_metrics, slice_contributions
 from rt_imaging_mcp.geometry import net_slice_area, polygon_mask, polygon_work
 from rt_imaging_mcp.security.errors import (
     FrameOfReferenceError,
@@ -49,7 +52,10 @@ from rt_imaging_mcp.tools.rt_common import (
 )
 
 MAX_PARAMETERS = 20
-MAX_RASTER_WORK = 400_000_000
+# Rasterisation work is bounding-box cells plus edge crossings (see geometry.polygon_work).
+# Real organs on a 1 mm dose grid need a few million units per slice, so the cap is about a
+# thousand times larger than that and still keeps one request to some seconds.
+MAX_RASTER_WORK = 1_000_000_000
 DEFAULT_PERCENTAGES = (95.0, 50.0, 2.0)
 DEFAULT_THRESHOLDS_GY = (20.0,)
 MAX_THRESHOLD_GY = 10_000.0
@@ -57,7 +63,7 @@ _TOLERANCE_MM = 1e-6
 
 METHOD_NOTES = (
     "voxel centres inside contours; nested contours are holes",
-    "nearest contour slice within one slab; no partial-volume weighting",
+    "voxel weights follow the overlap of dose slices with contour slabs",
     "approximate; not validated against a treatment planning system",
 )
 
@@ -230,9 +236,9 @@ def rt_dvh_metrics(
 
     contour_z = sorted(slices)
     contour_thickness = float(np.median(np.diff(contour_z))) if len(contour_z) >= 2 else thickness
-    mapping = nearest_slice_indices(zs.tolist(), contour_z, contour_thickness)
+    contributions = slice_contributions(zs.tolist(), thickness, contour_z, contour_thickness)
 
-    used = sorted({index for index in mapping if index is not None})
+    used = sorted({index for entries in contributions for index, _ in entries})
     work = sum(
         polygon_work(xs, ys, polygon) for index in used for polygon in slices[contour_z[index]]
     )
@@ -247,15 +253,21 @@ def rt_dvh_metrics(
         masks[index] = mask
 
     parts = []
-    for frame, slice_index in enumerate(mapping):
-        if slice_index is None:
+    part_weights = []
+    for frame, entries in enumerate(contributions):
+        if not entries:
             continue
-        selected = raw[frame][masks[slice_index]]
-        if selected.size:
-            parts.append(selected)
+        weight_map = np.zeros((rows, columns))
+        for slice_index, weight in entries:
+            weight_map += weight * masks[slice_index]
+        included = weight_map > 0
+        if included.any():
+            parts.append(raw[frame][included])
+            part_weights.append(weight_map[included])
     if not parts:
         raise NoStructureVoxelsError()
     doses = np.concatenate(parts).astype(np.float64) * scaling
+    weights = np.concatenate(part_weights)
     voxel_volume = column_spacing * row_spacing * thickness
 
     boxes = [
@@ -287,9 +299,15 @@ def rt_dvh_metrics(
         "name_redacted": name is None,
         "dose_units": "GY",
         "voxel_count": int(len(doses)),
-        "volume_cm3": round(len(doses) * voxel_volume / 1000.0, 3),
+        "volume_cm3": round(float(weights.sum()) * voxel_volume / 1000.0, 3),
         "contour_volume_cm3": contour_volume,
         "inside_grid": inside_grid,
-        **dvh_metrics(doses, voxel_volume, percentages, thresholds),
+        "voxel_size_mm": {
+            "row": round(row_spacing, 4),
+            "column": round(column_spacing, 4),
+            "slice": round(thickness, 4),
+        },
+        "contour_slice_spacing_mm": round(contour_thickness, 4) if len(contour_z) >= 2 else None,
+        **dvh_metrics(doses, voxel_volume, percentages, thresholds, weights),
         "method_notes": list(METHOD_NOTES),
     }

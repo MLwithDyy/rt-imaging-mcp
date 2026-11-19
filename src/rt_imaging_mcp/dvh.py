@@ -1,6 +1,7 @@
 """Dose-volume metrics from per-voxel doses (pure numpy, no file access).
 
-Definitions (all voxels have equal volume):
+Definitions (voxels carry a weight; the weight is 1 unless a dose slice is only partly inside the
+structure or is shared between two contour slabs, see ``slice_contributions``):
 
 * ``D(p)``: the highest dose ``d`` such that at least ``p`` percent of the structure volume
   receives a dose of ``d`` or more. ``D(100)`` is the minimum dose, ``D(2)`` is a near-maximum dose.
@@ -19,38 +20,76 @@ from numpy.typing import NDArray
 
 DOSE_TOLERANCE_GY = 1e-9
 SLICE_TOLERANCE_MM = 1e-6
+WEIGHT_TOLERANCE = 1e-9
 
 
-def nearest_slice_indices(
-    dose_z: Sequence[float], contour_z: Sequence[float], thickness: float
-) -> list[int | None]:
-    """For each dose slice, the index of the contour slice whose slab contains it, or ``None``.
+def slice_contributions(
+    dose_z: Sequence[float],
+    dose_thickness: float,
+    contour_z: Sequence[float],
+    contour_thickness: float,
+) -> list[list[tuple[int, float]]]:
+    """For each dose slice, the contour slices it overlaps and the weight of each.
 
-    Each contour slice stands for a slab of ``thickness`` mm centred on its z. A dose slice maps
-    to the nearest contour slice if it lies inside that slab. Ties go to the lower z.
-    ``contour_z`` must be ascending.
+    Each contour slice stands for a slab of ``contour_thickness`` mm centred on its z, and each
+    dose slice for a slab of ``dose_thickness`` mm centred on its z. The weight of a contour
+    slice for a dose slice is the fraction of the dose slab that overlaps the contour slab.
+    A dose plane inside one slab gets ``[(index, 1.0)]``; a plane on the boundary between two
+    slabs gets half of each; a plane on the outer boundary of the structure gets half of the
+    outermost slab only; a plane outside gets ``[]``. Summed over all dose slices, every contour
+    slab receives exactly its own thickness, so the structure volume equals the sum of the slabs
+    however the planes fall. If slabs overlap (irregular contour spacing) the weights of one dose
+    slice are scaled to add up to at most 1. ``contour_z`` must be ascending.
     """
     contour = np.asarray(contour_z, dtype=float)
-    half = thickness / 2.0 + SLICE_TOLERANCE_MM
-    result: list[int | None] = []
+    half_contour = contour_thickness / 2.0
+    slab_low = contour - half_contour
+    slab_high = contour + half_contour
+    half_dose = dose_thickness / 2.0
+
+    result: list[list[tuple[int, float]]] = []
     for z in dose_z:
-        distances = np.abs(contour - z)
-        index = int(np.argmin(distances))
-        result.append(index if distances[index] <= half else None)
+        overlap = np.minimum(slab_high, z + half_dose) - np.maximum(slab_low, z - half_dose)
+        weights = np.clip(overlap, 0.0, None) / dose_thickness
+        total = float(weights.sum())
+        if total > 1.0:
+            weights = weights / total
+        result.append(
+            [
+                (int(index), float(weights[index]))
+                for index in np.flatnonzero(weights > SLICE_TOLERANCE_MM)
+            ]
+        )
     return result
 
 
-def dose_at_volume(sorted_doses: NDArray[np.float64], percent: float) -> float:
-    """``D(percent)`` for ascending ``sorted_doses``."""
-    count = len(sorted_doses)
-    needed = math.ceil(round(percent * count / 100.0, 9))
-    needed = min(max(needed, 1), count)
-    return float(sorted_doses[count - needed])
+def dose_at_volume(
+    sorted_doses: NDArray[np.float64],
+    percent: float,
+    sorted_weights: NDArray[np.float64] | None = None,
+) -> float:
+    """``D(percent)`` for ascending ``sorted_doses`` (with the matching ``sorted_weights``)."""
+    if sorted_weights is None:
+        count = len(sorted_doses)
+        needed = min(max(math.ceil(round(percent * count / 100.0, 9)), 1), count)
+        return float(sorted_doses[count - needed])
+    target = percent * float(sorted_weights.sum()) / 100.0
+    from_the_top = np.cumsum(sorted_weights[::-1])
+    index = int(np.searchsorted(from_the_top, target - WEIGHT_TOLERANCE, side="left"))
+    index = min(index, len(sorted_doses) - 1)
+    return float(sorted_doses[::-1][index])
 
 
-def volume_at_dose(doses: NDArray[np.float64], threshold_gy: float) -> int:
-    """Number of voxels receiving at least ``threshold_gy``."""
-    return int(np.count_nonzero(doses >= threshold_gy - DOSE_TOLERANCE_GY))
+def volume_at_dose(
+    doses: NDArray[np.float64],
+    threshold_gy: float,
+    weights: NDArray[np.float64] | None = None,
+) -> float:
+    """Number of voxels (weighted when ``weights`` is given) receiving at least ``threshold_gy``."""
+    above = doses >= threshold_gy - DOSE_TOLERANCE_GY
+    if weights is None:
+        return float(np.count_nonzero(above))
+    return float(weights[above].sum())
 
 
 def format_number(value: float) -> str:
@@ -63,23 +102,34 @@ def dvh_metrics(
     voxel_volume_mm3: float,
     percentages: Sequence[float],
     thresholds_gy: Sequence[float],
+    weights: NDArray[np.float64] | None = None,
 ) -> dict[str, Any]:
     """Statistics, D(p) and V(t) for the voxel doses of one structure."""
-    ordered = np.sort(doses)
-    count = len(ordered)
-    d_metrics = {f"D{format_number(p)}": round(dose_at_volume(ordered, p), 6) for p in percentages}
+    order = np.argsort(doses, kind="stable")
+    ordered = doses[order]
+    ordered_weights = None if weights is None else weights[order]
+    total = float(len(ordered)) if ordered_weights is None else float(ordered_weights.sum())
+    d_metrics = {
+        f"D{format_number(p)}": round(dose_at_volume(ordered, p, ordered_weights), 6)
+        for p in percentages
+    }
     v_metrics: dict[str, dict[str, float]] = {}
     for threshold in thresholds_gy:
-        voxels = volume_at_dose(ordered, threshold)
+        voxels = volume_at_dose(ordered, threshold, ordered_weights)
         v_metrics[f"V{format_number(threshold)}Gy"] = {
-            "percent": round(100.0 * voxels / count, 4),
+            "percent": round(100.0 * voxels / total, 4),
             "volume_cm3": round(voxels * voxel_volume_mm3 / 1000.0, 6),
         }
+    mean = (
+        np.average(ordered, weights=ordered_weights)
+        if ordered_weights is not None
+        else ordered.mean(dtype=np.float64)
+    )
     return {
         "dose_gy": {
             "min": round(float(ordered[0]), 6),
             "max": round(float(ordered[-1]), 6),
-            "mean": round(float(ordered.mean(dtype=np.float64)), 6),
+            "mean": round(float(mean), 6),
         },
         "d_metrics_gy": d_metrics,
         "v_metrics": v_metrics,
