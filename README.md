@@ -65,8 +65,22 @@ See [docs/validation.md](docs/validation.md) for the numbers, the differences an
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
+### Install from PyPI
+
 ```bash
-git clone https://github.com/MLwithDyy/rt-imaging-mcp
+uvx rt-imaging-mcp --root /path/to/de-identified/images
+```
+
+For Claude Code:
+
+```bash
+claude mcp add rt-imaging -- uvx rt-imaging-mcp --root /path/to/images
+```
+
+### Install from source
+
+```bash
+git clone [https://github.com/MLwithDyy/rt-imaging-mcp](https://github.com/MLwithDyy/rt-imaging-mcp)
 cd rt-imaging-mcp
 uv sync
 uv run rt-imaging-mcp --root /path/to/de-identified/images
@@ -75,7 +89,7 @@ uv run rt-imaging-mcp --root /path/to/de-identified/images
 Options: `--enable-tag KEYWORD` (repeatable, opt-in DICOM attributes), `--enable-roi-name NAME` (repeatable, extra
 structure names to return), `--max-files`, `--max-depth`, `--max-file-mb`.
 
-### Claude Code
+### Claude Code (from source)
 
 ```bash
 claude mcp add rt-imaging -- uv run --directory /path/to/rt-imaging-mcp rt-imaging-mcp --root /path/to/images
@@ -124,7 +138,7 @@ and a pre-commit hook. Do not attach real patient data to issues or pull request
 2. CI on Python 3.11-3.13, Linux and Windows (done)
 3. Radiotherapy objects: RTSTRUCT, RTDOSE and RTPLAN summaries and approximate DVH metrics (done)
 4. Radiomics feature extraction with validation against IBSI reference data
-5. Release to PyPI
+5. Release to PyPI (done)
 
 ## Related work
 
