@@ -55,8 +55,10 @@ identifiers (use `opaque_paths=true` to omit them), and prompt injection through
 
 ## Validation
 
-Dose-volume metrics are checked against hand-calculated phantoms and against dicompyler-core on synthetic data.
-They are **not** validated against a treatment planning system or real patient data yet.
+Dose-volume metrics are checked against hand-calculated phantoms, against dicompyler-core on synthetic data, and
+against dicompyler-core on three patients of one public collection (preliminary: volume, mean dose, D50 and D2
+agree on all 39 structures within the stated tolerances; a few D95 and V(t) differences are unexplained).
+They are **not** validated against a treatment planning system.
 See [docs/validation.md](docs/validation.md) for the numbers, the differences and how to reproduce them.
 
 ## Install and run

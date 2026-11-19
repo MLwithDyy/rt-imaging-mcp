@@ -97,6 +97,8 @@ def test_uniform_dose_in_a_cube(root: Path) -> None:
     assert result["v_metrics"]["V20Gy"] == {"percent": 100.0, "volume_cm3": 1.0}
     assert result["v_metrics"]["V20.5Gy"] == {"percent": 0.0, "volume_cm3": 0.0}
     assert result["dose_units"] == "GY"
+    assert result["voxel_size_mm"] == {"row": 2.0, "column": 2.0, "slice": 2.0}
+    assert result["contour_slice_spacing_mm"] == 2.0
     assert result["name"] == "PTV"
     assert result["name_redacted"] is False
 
@@ -150,10 +152,12 @@ def test_dose_slices_between_contour_slices(root: Path) -> None:
     # dose slices at z = 0, 2, ..., 12; the last one is outside the structure
     dose_file(root, [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0])
     result = run(root)
+    # Contour slabs cover z from -1.5 to 10.5. Dose slices at z = 0..8 lie fully inside,
+    # the slice at z = 10 (slab 9..11) is 75 % inside and the slice at z = 12 is outside.
     assert result["voxel_count"] == 6 * 25
-    assert result["volume_cm3"] == pytest.approx(1.2)
+    assert result["volume_cm3"] == pytest.approx(1.15)  # 5.75 slices of 200 mm^3
     assert result["contour_volume_cm3"] == pytest.approx(1.2)
-    assert result["dose_gy"]["mean"] == pytest.approx(35.0)
+    assert result["dose_gy"]["mean"] == pytest.approx((10 + 20 + 30 + 40 + 50 + 0.75 * 60) / 5.75)
     assert result["dose_gy"]["max"] == 60.0
 
 
@@ -510,3 +514,125 @@ def test_method_notes_state_the_approximation(root: Path) -> None:
     notes = " ".join(run(root)["method_notes"])
     assert "approximate" in notes
     assert "not validated" in notes
+
+
+def test_dense_realistic_contours_are_not_refused_and_match_the_oracle(root: Path) -> None:
+    """600-vertex outlines on 20 slices and a 1.5 mm grid: the case that hit the old work limit."""
+    from tests.test_geometry import reference_mask
+
+    angles = np.linspace(0, 2 * np.pi, 600, endpoint=False)
+    outline = [
+        (100 + 60 * np.cos(a) * (1 + 0.1 * np.sin(5 * a)), 100 + 50 * np.sin(a)) for a in angles
+    ]
+    slices = [1.5 * index for index in range(20)]
+    struct_file(root, [RoiSpec(1, "Liver", "ORGAN", "MANUAL", extrude(outline, slices))])
+    raw = np.full((20, 200, 200), round(20.0 / SCALING), dtype=np.uint32)
+    write_rtdose(
+        root / "dose.dcm",
+        raw,
+        scaling=SCALING,
+        pixel_spacing=(1.5, 1.5),
+        slice_offsets=slices,
+        origin=(0.0, 0.0, 0.0),
+    )
+    result = run(root)
+    grid = np.arange(200) * 1.5
+    expected = int(reference_mask(grid, grid, np.array(outline)).sum()) * 20
+    assert result["voxel_count"] == expected > 50_000
+    assert result["dose_gy"]["mean"] == pytest.approx(20.0)
+
+
+# ------------------- dose planes denser than the contour planes (a ratio of 2 to 1)
+
+CONTOUR_PLANES = [3.0 * index for index in range(20)]  # slabs cover z from -1.5 to 58.5
+DOSE_PLANES = [-3.0 + 1.5 * index for index in range(43)]  # planes sit on the slab boundaries
+
+
+def linear_dose_phantom(root: Path, gradient: float = 0.4, mirrored: bool = False) -> None:
+    struct_file(
+        root, [RoiSpec(1, "PTV", "PTV", "MANUAL", extrude(square(-1, -1, 10), CONTOUR_PLANES))]
+    )
+    raw = np.empty((len(DOSE_PLANES), 10, 10), dtype=np.uint32)
+    for index, z in enumerate(DOSE_PLANES):
+        position = (57.0 - z) if mirrored else z
+        raw[index] = round((20.0 + gradient * position) / SCALING)
+    write_rtdose(
+        root / "dose.dcm",
+        raw,
+        scaling=SCALING,
+        pixel_spacing=(2.0, 2.0),
+        slice_offsets=[1.5 * index for index in range(len(DOSE_PLANES))],
+        origin=(0.0, 0.0, -3.0),
+    )
+
+
+def test_denser_dose_planes_reproduce_the_continuous_answer(root: Path) -> None:
+    """The dose rises 0.4 Gy per mm over a structure spanning z = -1.5..58.5 mm.
+
+    For a continuous structure the dose is uniformly distributed between 19.4 and 43.4 Gy:
+    mean 31.4, D95 20.6, D50 31.4 and D2 42.92 Gy. Planes are 0.6 Gy apart, so D(p) can be
+    off by at most one plane.
+    """
+    linear_dose_phantom(root)
+    result = run(root)
+    assert result["volume_cm3"] == pytest.approx(6.0)  # 40 plane-equivalents x 150 mm^3
+    assert result["contour_volume_cm3"] == pytest.approx(6.0)
+    assert (
+        result["voxel_count"] == 41 * 25
+    )  # planes at z = -1.5 .. 58.5; the two end planes weigh 0.5
+    assert result["dose_gy"]["min"] == pytest.approx(19.4)
+    assert result["dose_gy"]["max"] == pytest.approx(43.4)
+    assert result["dose_gy"]["mean"] == pytest.approx(31.4)
+    assert result["d_metrics_gy"]["D95"] == pytest.approx(20.6)
+    assert result["d_metrics_gy"]["D50"] == pytest.approx(31.4)
+    assert result["d_metrics_gy"]["D2"] == pytest.approx(42.92, abs=0.6)
+    assert result["d_metrics_gy"]["D2"] == pytest.approx(42.8)
+
+
+def test_the_structure_volume_matches_its_contours_when_planes_sit_on_slab_boundaries(
+    root: Path,
+) -> None:
+    """Regression test: planes exactly on the outer boundary used to count in full (+2.5 %)."""
+    linear_dose_phantom(root)
+    result = run(root)
+    assert result["volume_cm3"] == pytest.approx(result["contour_volume_cm3"], rel=1e-9)
+
+
+def test_a_mirrored_dose_gradient_gives_the_same_metrics(root: Path) -> None:
+    linear_dose_phantom(root)
+    forward = run(root)
+    linear_dose_phantom(root, mirrored=True)
+    backward = run(root)
+    for key in ("dose_gy", "d_metrics_gy", "volume_cm3"):
+        assert backward[key] == forward[key]
+
+
+def test_a_growing_cross_section_does_not_bias_volume_or_mean_dose(root: Path) -> None:
+    """Planes that lie exactly between two contour slices must take half from each.
+
+    Ten contours 3 mm apart cover n x n voxel centres with n = 2..11, so the cross-section grows.
+    The structure volume is the sum of the slabs and, because the dose rises linearly with z, the
+    mean dose is the voxel-weighted mean of the dose at the contour planes. Giving a shared plane
+    wholly to the lower contour made the volume 5.8 % too small and the mean 0.08 Gy too high.
+    """
+    counts = [index + 2 for index in range(10)]
+    contours = [(3.0 * index, square(-1.0, -1.0, 2.0 * n)) for index, n in enumerate(counts)]
+    struct_file(root, [RoiSpec(1, "PTV", "PTV", "MANUAL", contours)])
+    planes = [-3.0 + 1.5 * k for k in range(23)]
+    raw = np.empty((len(planes), 14, 14), dtype=np.uint32)
+    for k, z in enumerate(planes):
+        raw[k] = round((20.0 + 0.4 * z) / SCALING)
+    write_rtdose(
+        root / "dose.dcm",
+        raw,
+        scaling=SCALING,
+        pixel_spacing=(2.0, 2.0),
+        slice_offsets=[1.5 * k for k in range(len(planes))],
+        origin=(0.0, 0.0, -3.0),
+    )
+    result = run(root)
+    voxels = sum(n * n for n in counts)
+    expected_volume = voxels * 4.0 * 3.0 / 1000.0
+    expected_mean = sum(n * n * (20.0 + 0.4 * 3.0 * i) for i, n in enumerate(counts)) / voxels
+    assert result["volume_cm3"] == pytest.approx(expected_volume, rel=1e-9)
+    assert result["dose_gy"]["mean"] == pytest.approx(expected_mean, abs=1e-6)

@@ -71,12 +71,34 @@ def _index_range(axis: NDArray[np.float64], low: float, high: float) -> tuple[in
     return start, max(start, stop)
 
 
+def _row_spans(
+    ys: NDArray[np.float64],
+    x1: NDArray[np.float64],
+    y1: NDArray[np.float64],
+    y2: NDArray[np.float64],
+) -> tuple[NDArray[np.intp], NDArray[np.intp], NDArray[np.intp]]:
+    """For every edge, the rows whose centre line it crosses.
+
+    An edge crosses a row line ``y`` when ``min(y1, y2) <= y < max(y1, y2)``, the half-open rule
+    of the ray casting test. Returns ``(first_row, row_count, edge_of_each_crossing)``.
+    """
+    low = np.minimum(y1, y2)
+    high = np.maximum(y1, y2)
+    first = np.searchsorted(ys, low, side="left")
+    last = np.searchsorted(ys, high, side="left")
+    counts = np.maximum(last - first, 0)
+    edge_of_crossing = np.repeat(np.arange(len(x1)), counts)
+    return first, counts, edge_of_crossing
+
+
 def polygon_work(xs: NDArray[np.float64], ys: NDArray[np.float64], polygon: Polygon) -> int:
-    """Upper bound of the work ``polygon_mask`` does: bounding-box cells times crossing edges."""
+    """Work ``polygon_mask`` does: cells in the bounding box plus row crossings of the edges."""
     min_x, max_x, min_y, max_y = _bounds(polygon)
     c0, c1 = _index_range(xs, min_x, max_x)
     r0, r1 = _index_range(ys, min_y, max_y)
-    return (c1 - c0) * (r1 - r0) * len(_crossing_edges(polygon)[0])
+    x1, y1, _, y2 = _crossing_edges(polygon)
+    _, counts, _ = _row_spans(ys, x1, y1, y2)
+    return (c1 - c0) * (r1 - r0) + int(counts.sum())
 
 
 def polygon_mask(
@@ -84,9 +106,13 @@ def polygon_mask(
 ) -> NDArray[np.bool_]:
     """Mask of grid cell centres inside ``polygon``, shape (len(ys), len(xs)).
 
-    ``xs`` (columns) and ``ys`` (rows) must be ascending. Uses the even-odd rule with the same
-    edge convention as ``point_in_polygon``: a centre exactly on a vertical edge counts as
-    inside on its left side only.
+    ``xs`` (columns) and ``ys`` (rows) must be ascending. Uses the even-odd rule. A centre is inside
+    when an odd number of edge crossings of its row lie at or left of it, so a centre exactly on a
+    vertical edge counts as inside on the left side of the polygon only.
+
+    Scanline method: for each row the x positions where edges cross the row line are sorted and
+    the cells between pairs of crossings are filled, which costs about (cells + crossings) instead
+    of (cells x edges).
     """
     mask = np.zeros((ys.size, xs.size), dtype=bool)
     min_x, max_x, min_y, max_y = _bounds(polygon)
@@ -95,13 +121,38 @@ def polygon_mask(
     if c1 <= c0 or r1 <= r0:
         return mask
 
-    grid_x, grid_y = np.meshgrid(xs[c0:c1], ys[r0:r1])
-    px, py = grid_x.ravel(), grid_y.ravel()
-    inside = np.zeros(px.shape, dtype=bool)
     x1, y1, x2, y2 = _crossing_edges(polygon)
-    for ax, ay, bx, by in zip(x1, y1, x2, y2, strict=True):
-        crosses = (ay > py) != (by > py)
-        x_at_py = (bx - ax) * (py - ay) / (by - ay) + ax
-        inside ^= crosses & (px < x_at_py)
-    mask[r0:r1, c0:c1] = inside.reshape(grid_x.shape)
+    first, counts, edge = _row_spans(ys, x1, y1, y2)
+    total = int(counts.sum())
+    if total == 0:
+        return mask
+
+    # Row and x position of every crossing of an edge with a row line.
+    within = np.arange(total) - np.repeat(np.cumsum(counts) - counts, counts)
+    rows = first[edge] + within
+    py = ys[rows]
+    ax, ay, bx, by = x1[edge], y1[edge], x2[edge], y2[edge]
+    x_at_row = (bx - ax) * (py - ay) / (by - ay) + ax
+
+    # Sort by row, then x, and pair crossings 1-2, 3-4, ... within each row.
+    order = np.lexsort((x_at_row, rows))
+    rows, x_at_row = rows[order], x_at_row[order]
+    same_row_next = np.zeros(total, dtype=bool)
+    same_row_next[:-1] = rows[1:] == rows[:-1]
+    row_start = np.flatnonzero(np.r_[True, rows[1:] != rows[:-1]])
+    row_length = np.diff(np.r_[row_start, total])
+    position = np.arange(total) - np.repeat(row_start, row_length)
+    opening = np.flatnonzero((position % 2 == 0) & same_row_next)
+
+    first_col = np.searchsorted(xs, x_at_row[opening], side="left") - c0
+    end_col = np.searchsorted(xs, x_at_row[opening + 1], side="left") - c0
+    row_index = rows[opening] - r0
+
+    width = c1 - c0
+    flat_open = row_index * (width + 1) + first_col
+    flat_close = row_index * (width + 1) + end_col
+    size = (r1 - r0) * (width + 1)
+    delta = np.bincount(flat_open, minlength=size) - np.bincount(flat_close, minlength=size)
+    filled = np.cumsum(delta.reshape(r1 - r0, width + 1), axis=1)[:, :width] > 0
+    mask[r0:r1, c0:c1] = filled
     return mask
