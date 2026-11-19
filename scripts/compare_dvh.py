@@ -25,6 +25,23 @@ REPO = Path(__file__).resolve().parents[1]
 REFERENCE = Path(__file__).with_name("dvh_reference_dicompyler.py")
 
 
+def metrics_from_result(result: dict[str, Any]) -> dict[str, float]:
+    """Flat metrics (the keys dicompyler-core results use) from an rt_dvh_metrics result."""
+    # dicompyler-core computes the volume by counting dose-grid pixel centres inside each contour
+    # plane and multiplying by the contour thickness, so it is a grid-sampled volume. Compare it
+    # with our grid-sampled volume (not with the polygon-area volume).
+    metrics: dict[str, float] = {
+        "volume_cm3": result["volume_cm3"],
+        "min": result["dose_gy"]["min"],
+        "max": result["dose_gy"]["max"],
+        "mean": result["dose_gy"]["mean"],
+    }
+    metrics.update(result["d_metrics_gy"])
+    for key, value in result["v_metrics"].items():
+        metrics[f"{key}_cm3"] = value["volume_cm3"]
+    return metrics
+
+
 def our_metrics(
     struct: Path, dose: Path, roi: int, percent: list[float], gy: list[float]
 ) -> dict[str, float]:
@@ -42,32 +59,37 @@ def our_metrics(
         percent,
         gy,
     )
-    metrics: dict[str, float] = {
-        "volume_cm3": result["volume_cm3"],
-        "min": result["dose_gy"]["min"],
-        "max": result["dose_gy"]["max"],
-        "mean": result["dose_gy"]["mean"],
-    }
-    metrics.update(result["d_metrics_gy"])
-    for key, value in result["v_metrics"].items():
-        metrics[f"{key}_cm3"] = value["volume_cm3"]
-    return metrics
+    return metrics_from_result(result)
+
+
+def reference_command(
+    struct: Path, dose: Path, rois: list[int], percent: list[float], gy: list[float]
+) -> list[str]:
+    uv = shutil.which("uv")
+    if uv is None:
+        raise SystemExit("uv was not found on PATH; install it from https://docs.astral.sh/uv/")
+    roi_arguments = [str(rois[0])] if len(rois) == 1 else ["--rois", *[str(r) for r in rois]]
+    return [
+        uv, "run", "--no-project", "--isolated", "--python", "3.12",
+        "--with", "dicompyler-core", "--with", "pydicom<3", "--with", "numpy<2", "--with", "scipy",
+        "python", str(REFERENCE), str(struct), str(dose), *roi_arguments,
+        "--percent", *[f"{p:g}" for p in percent],
+        "--gy", *[f"{t:g}" for t in gy],
+    ]  # fmt: skip
+
+
+def run_reference(
+    struct: Path, dose: Path, rois: list[int], percent: list[float], gy: list[float]
+) -> subprocess.CompletedProcess[str]:
+    """Run the reference script. Callers decide what to print: stderr can contain file paths."""
+    command = reference_command(struct, dose, rois, percent, gy)
+    return subprocess.run(command, capture_output=True, text=True, check=False)
 
 
 def reference_metrics(
     struct: Path, dose: Path, roi: int, percent: list[float], gy: list[float]
 ) -> dict[str, float]:
-    uv = shutil.which("uv")
-    if uv is None:
-        raise SystemExit("uv was not found on PATH; install it from https://docs.astral.sh/uv/")
-    command = [
-        uv, "run", "--no-project", "--isolated",
-        "--with", "dicompyler-core", "--with", "pydicom<3", "--with", "numpy<2", "--with", "scipy",
-        "python", str(REFERENCE), str(struct), str(dose), str(roi),
-        "--percent", *[f"{p:g}" for p in percent],
-        "--gy", *[f"{t:g}" for t in gy],
-    ]  # fmt: skip
-    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    completed = run_reference(struct, dose, [roi], percent, gy)
     if completed.returncode != 0:
         sys.stderr.write(completed.stderr[-2000:])
         raise SystemExit("the dicompyler-core reference run failed")
