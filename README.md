@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/MLwithDyy/rt-imaging-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MLwithDyy/rt-imaging-mcp/actions/workflows/ci.yml)
 
+<!-- mcp-name: io.github.MLwithDyy/rt-imaging-mcp -->
+
 A local, read-only [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI agents
 inspect medical image files (DICOM, NIfTI) on your own disk, with PHI-safe output by default.
 

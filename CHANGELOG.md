@@ -8,6 +8,8 @@ All notable changes are documented here. The format follows
 
 ## [0.1.0] - 2026-11-19
 
+## [0.1.1] - 2026-11-22
+
 ### Added
 
 - Read-only MCP server with stdio transport and a mandatory `--root` directory.
@@ -22,6 +24,7 @@ All notable changes are documented here. The format follows
   Python 3.11-3.13.
 - Scripts to compare dose-volume metrics with dicompyler-core on synthetic phantoms, and `validate_collection.py`
   to run the comparison over a folder of RT cases and print anonymous aggregate numbers.
+- MCP registry metadata: `server.json` and the `mcp-name` ownership marker in the README.
 
 ### Changed
 
@@ -33,6 +36,7 @@ All notable changes are documented here. The format follows
   from each instead of belonging wholly to the lower one. This removes a bias of about one plane at the structure
   ends and a bias that grew with the change of cross-section between slices (found with phantoms whose dose planes
   are twice as dense as the contour planes), and makes the structure volume equal to the sum of its slabs.
+- The README documents installation from PyPI with `uvx`.
 
 ### Fixed
 
