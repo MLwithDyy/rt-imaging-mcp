@@ -1,0 +1,32 @@
+
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.MLwithDyy/rt-imaging-mcp",
+  "description": "Local read-only MCP server for DICOM, NIfTI and RT data with PHI-safe output.",
+  "repository": {
+    "url": "https://github.com/MLwithDyy/rt-imaging-mcp",
+    "source": "github",
+    "id": "1457978962"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "rt-imaging-mcp",
+      "version": "0.1.1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--root",
+          "description": "Root directory containing local medical imaging files.",
+          "format": "filepath",
+          "isRequired": true
+        }
+      ]
+    }
+  ]
+}
