@@ -62,6 +62,7 @@ against dicompyler-core on three patients of one public collection (preliminary:
 agree on all 39 structures within the stated tolerances; a few D95 and V(t) differences are unexplained).
 They are **not** validated against a treatment planning system.
 See [docs/validation.md](docs/validation.md) for the numbers, the differences and how to reproduce them.
+The story of how two bias bugs in the dose-volume code were found (in Indonesian): [docs/validation-story.md](docs/validation-story.md).
 
 ## Install and run
 
