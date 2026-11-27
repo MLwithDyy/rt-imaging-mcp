@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/MLwithDyy/rt-imaging-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MLwithDyy/rt-imaging-mcp/actions/workflows/ci.yml)
 
+[![RT Imaging MCP server](https://mcprush.com/badge/rt-imaging-mcp/card.svg)](https://mcprush.com/to/rt-imaging-mcp?ref=badge)
+
 <!-- mcp-name: io.github.MLwithDyy/rt-imaging-mcp -->
 
 A local, read-only [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI agents
