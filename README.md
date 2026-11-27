@@ -145,8 +145,11 @@ and a pre-commit hook. Do not attach real patient data to issues or pull request
 
 ## Related work
 
-[`dicom-mcp`](https://github.com/ChristianHinge/dicom-mcp) connects agents to DICOM network servers (PACS). This project
-is complementary: it works on local files and focuses on PHI-safe output, radiotherapy objects and radiomics.
+- [`dicom-mcp`](https://github.com/ChristianHinge/dicom-mcp) connects agents to DICOM network servers (PACS). This project
+  is complementary: it works on local files and focuses on PHI-safe output, radiotherapy objects and radiomics.
+- [`rt-qa-agent`](https://github.com/MLwithDyy/rt-qa-agent) is a reference downstream radiotherapy QA audit agent built on
+  `rt-imaging-mcp`, pairing its read-only DICOM/DVH tools with YAML clinical protocols (`RTOG 0813`, `EMBRACE-II`, `RTOG 1016`)
+  and deterministic dose-constraint checks.
 
 ## Contributing and security
 
